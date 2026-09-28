@@ -5,8 +5,19 @@ import { randomInt } from "node:crypto";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { Server } from "socket.io";
-import { GAME_CONFIG, type Player, type Role, type RoomState } from "@dungeon/shared";
+import { Server, type Socket } from "socket.io";
+import { GAME_CONFIG, type Ability, type ClientEvents, type Player, type Role, type ServerEvents } from "@dungeon/shared";
+import {
+  clearTimers,
+  handleAnswer,
+  publicView,
+  startGame,
+  useAbility,
+  validateDeck,
+  validateDeckTitle,
+  type EngineHooks,
+  type GameRoom,
+} from "./game.js";
 
 const app = express();
 app.use(cors());
@@ -20,24 +31,30 @@ if (existsSync(indexHtml)) {
   console.warn(`No se encontró el frontend compilado en ${webDir}. Ejecutá "npm run build" desde la raíz.`);
 }
 const httpServer = createServer(app);
-const io = new Server(httpServer, { cors: { origin: process.env.WEB_ORIGIN?.split(",") ?? "*" } });
+const io = new Server<ClientEvents, ServerEvents>(httpServer, {
+  cors: { origin: process.env.WEB_ORIGIN?.split(",") ?? "*" },
+});
 
-type Room = RoomState & { sockets: Map<string, string> };
-const rooms = new Map<string, Room>();
+const rooms = new Map<string, GameRoom>();
 const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const cleanName = (value: string) => value.trim().replace(/\s+/g, " ");
 function error(socketId: string, code: string, message: string) {
   io.to(socketId).emit("room:error", { code, message });
 }
-function snapshot(room: Room): RoomState {
-  const { sockets: _sockets, ...state } = room;
-  return { ...state, players: state.players.map((p) => ({ ...p })) };
-}
-function publish(room: Room) {
+function publish(room: GameRoom) {
   room.updatedAt = Date.now();
-  io.to(room.code).emit("room:state", snapshot(room));
+  if (room.game) room.game.pending = room.remaining.length;
+  io.to(room.code).emit("room:state", publicView(room));
 }
-function findPlayer(room: Room, playerId: string) { return room.players.find((p) => p.id === playerId); }
+const hooks: EngineHooks = {
+  onState: publish,
+  onReveal: (room, reveal) => io.to(room.code).emit("game:reveal", reveal),
+  onError: (room, playerId, code, message) => {
+    const socketId = room.sockets.get(playerId);
+    if (socketId) error(socketId, code, message);
+  },
+};
+function findPlayer(room: GameRoom, playerId: string) { return room.players.find((p) => p.id === playerId); }
 function validNickname(raw: string) {
   const name = cleanName(raw);
   return name.length >= GAME_CONFIG.nicknameMinLength && name.length <= GAME_CONFIG.nicknameMaxLength && /^[\p{L}\p{N} _.-]+$/u.test(name) ? name : null;
@@ -49,7 +66,7 @@ function newCode() {
   } while (rooms.has(code));
   return code;
 }
-function attach(room: Room, player: Player, socketId: string) {
+function attach(room: GameRoom, player: Player, socketId: string) {
   const previousSocket = room.sockets.get(player.id);
   if (previousSocket && previousSocket !== socketId) io.sockets.sockets.get(previousSocket)?.leave(room.code);
   player.online = true;
@@ -59,17 +76,43 @@ function attach(room: Room, player: Player, socketId: string) {
   socket?.data && (socket.data.playerId = player.id, socket.data.roomCode = room.code);
   publish(room);
 }
-function nicknameAvailable(room: Room, nickname: string, exceptId?: string) {
+function nicknameAvailable(room: GameRoom, nickname: string, exceptId?: string) {
   return !room.players.some((p) => p.id !== exceptId && p.nickname.toLocaleLowerCase() === nickname.toLocaleLowerCase());
 }
+const newPlayer = (id: string, nickname: string, isCreator: boolean): Player => ({
+  id,
+  nickname,
+  role: null,
+  online: true,
+  isCreator,
+  hp: GAME_CONFIG.playerMaxHp,
+  maxHp: GAME_CONFIG.playerMaxHp,
+  eliminated: false,
+});
 
-io.on("connection", (socket) => {
+io.on("connection", (socket: Socket<ClientEvents, ServerEvents>) => {
   socket.on("room:create", ({ playerId, nickname }) => {
     const name = validNickname(nickname);
     if (!name) return error(socket.id, "INVALID_NICKNAME", "Usá un apodo de 2 a 18 caracteres (letras, números, espacios, punto, guion o _).");
     const code = newCode();
-    const player: Player = { id: playerId, nickname: name, role: null, online: true, isCreator: true };
-    const room: Room = { code, status: "lobby", creatorId: playerId, players: [player], settings: { questionTimeSeconds: 20, cardCount: 10 }, updatedAt: Date.now(), sockets: new Map() };
+    const player = newPlayer(playerId, name, true);
+    const room: GameRoom = {
+      code,
+      status: "lobby",
+      creatorId: playerId,
+      players: [player],
+      settings: { questionTimeSeconds: GAME_CONFIG.questionTimeSeconds, cardCount: 0 },
+      deck: null,
+      game: null,
+      updatedAt: Date.now(),
+      sockets: new Map(),
+      cards: [],
+      remaining: [],
+      drawn: null,
+      discardedFor: null,
+      idleTimeouts: 0,
+      timers: {},
+    };
     rooms.set(code, room);
     attach(room, player, socket.id);
     socket.emit("room:created", { code });
@@ -90,7 +133,7 @@ io.on("connection", (socket) => {
     if (!name) return error(socket.id, "INVALID_NICKNAME", "Usá un apodo de 2 a 18 caracteres (letras, números, espacios, punto, guion o _).");
     if (!nicknameAvailable(room, name)) return error(socket.id, "NICKNAME_TAKEN", "Ese apodo ya está en uso en esta sala.");
     if (room.players.length >= GAME_CONFIG.maxPlayers) return error(socket.id, "ROOM_FULL", `La sala llegó al límite de ${GAME_CONFIG.maxPlayers} jugadores.`);
-    const player: Player = { id: playerId, nickname: name, role: null, online: true, isCreator: false };
+    const player = newPlayer(playerId, name, false);
     room.players.push(player);
     attach(room, player, socket.id);
     socket.emit("room:joined", { code });
@@ -117,6 +160,67 @@ io.on("connection", (socket) => {
     publish(room);
   });
 
+  const roomOf = (socket: Socket<ClientEvents, ServerEvents>) => {
+    const code = socket.data.roomCode as string | undefined;
+    const id = socket.data.playerId as string | undefined;
+    const room = code ? rooms.get(code) : undefined;
+    const player = room && id ? findPlayer(room, id) : undefined;
+    return room && player ? { room, player } : null;
+  };
+
+  socket.on("deck:upload", ({ title, cards }) => {
+    const ctx = roomOf(socket);
+    if (!ctx) return error(socket.id, "NOT_IN_ROOM", "No estás en una sala.");
+    const { room, player } = ctx;
+    if (room.creatorId !== player.id) return error(socket.id, "NOT_CREATOR", "Solo quien creó la sala puede cargar el mazo.");
+    if (room.status !== "lobby") return error(socket.id, "GAME_STARTED", "No se puede cambiar el mazo con la partida en curso.");
+    const { cards: valid, error: invalid } = validateDeck(cards);
+    if (invalid) return error(socket.id, "INVALID_DECK", invalid);
+    room.cards = valid;
+    room.deck = { title: validateDeckTitle(title), size: valid.length };
+    publish(room);
+  });
+
+  socket.on("game:start", () => {
+    const ctx = roomOf(socket);
+    if (!ctx) return error(socket.id, "NOT_IN_ROOM", "No estás en una sala.");
+    const { room, player } = ctx;
+    if (room.creatorId !== player.id) return error(socket.id, "NOT_CREATOR", "Solo quien creó la sala puede empezar la partida.");
+    if (room.status !== "lobby") return error(socket.id, "GAME_STARTED", "La partida ya empezó.");
+    if (!room.deck) return error(socket.id, "NO_DECK", "Cargá un mazo antes de empezar.");
+    const sinRol = room.players.filter((p) => !p.role).map((p) => p.nickname);
+    if (sinRol.length) return error(socket.id, "MISSING_ROLE", `Elegí rol para: ${sinRol.join(", ")}.`);
+    startGame(room, hooks);
+  });
+
+  socket.on("game:answer", ({ answer }) => {
+    const ctx = roomOf(socket);
+    if (!ctx) return;
+    handleAnswer(ctx.room, hooks, ctx.player, Number(answer));
+  });
+
+  socket.on("game:ability", ({ ability }) => {
+    const ctx = roomOf(socket);
+    if (!ctx) return;
+    if (!["discard", "evade", "extend"].includes(ability)) return error(socket.id, "INVALID_ABILITY", "Esa habilidad no existe.");
+    useAbility(ctx.room, hooks, ctx.player, ability as Ability);
+  });
+
+  socket.on("game:lobby", () => {
+    const ctx = roomOf(socket);
+    if (!ctx) return error(socket.id, "NOT_IN_ROOM", "No estás en una sala.");
+    if (ctx.room.creatorId !== ctx.player.id) return error(socket.id, "NOT_CREATOR", "Solo quien creó la sala puede volver al lobby.");
+    if (ctx.room.status !== "results") return error(socket.id, "NOT_IN_RESULTS", "La partida sigue en curso.");
+    clearTimers(ctx.room);
+    ctx.room.game = null;
+    ctx.room.status = "lobby";
+    for (const p of ctx.room.players) {
+      p.hp = p.maxHp;
+      p.eliminated = false;
+    }
+    publish(ctx.room);
+  });
+
   socket.on("disconnect", () => {
     const code = socket.data.roomCode as string | undefined;
     const id = socket.data.playerId as string | undefined;
@@ -141,9 +245,18 @@ setInterval(() => {
   for (const [code, room] of rooms) {
     if (room.updatedAt >= cutoff) continue;
     io.to(code).emit("room:closed", { code, message: "La sala se cerró por inactividad." });
+    clearTimers(room);
     rooms.delete(code);
   }
 }, 60_000).unref();
+
+for (const signal of ["SIGTERM", "SIGINT"] as const) {
+  process.on(signal, () => {
+    for (const room of rooms.values()) clearTimers(room);
+    io.close(() => httpServer.close(() => process.exit(0)));
+    setTimeout(() => process.exit(0), 10_000).unref();
+  });
+}
 
 const port = Number(process.env.PORT ?? 3001);
 httpServer.listen(port, "0.0.0.0", () => console.log(`Dungeon server listening on ${port}`));
