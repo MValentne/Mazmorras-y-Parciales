@@ -4,7 +4,8 @@
   "workspaces": ["apps/*", "packages/*"],
   "scripts": {
     "dev": "npm run build --workspace @dungeon/shared && concurrently -k \"npm:dev --workspace @dungeon/server\" \"npm:dev --workspace @dungeon/web\"",
-    "build": "npm run build --workspace @dungeon/shared && npm run build --workspace @dungeon/server && npm run build --workspace @dungeon/web"
+    "build": "npm run build --workspace @dungeon/shared && npm run build --workspace @dungeon/server && npm run build --workspace @dungeon/web",
+    "start": "node apps/server/dist/index.js"
   },
   "devDependencies": { "concurrently": "^9.1.2", "typescript": "^5.7.3" }
 }

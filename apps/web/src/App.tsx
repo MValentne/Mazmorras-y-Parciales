@@ -3,7 +3,7 @@ import QRCode from "qrcode";
 import { io, type Socket } from "socket.io-client";
 import { GAME_CONFIG, type RoomState, type Role } from "@dungeon/shared";
 
-const SERVER_URL = import.meta.env.VITE_SERVER_URL || "http://localhost:3001";
+const SERVER_URL = import.meta.env.VITE_SERVER_URL || window.location.origin;
 const getPlayerId = () => {
   let id = localStorage.getItem("dungeon-player-id");
   if (!id) { id = crypto.randomUUID(); localStorage.setItem("dungeon-player-id", id); }

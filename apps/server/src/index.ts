@@ -2,12 +2,23 @@ import express from "express";
 import cors from "cors";
 import { createServer } from "node:http";
 import { randomInt } from "node:crypto";
+import { existsSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { Server } from "socket.io";
 import { GAME_CONFIG, type Player, type Role, type RoomState } from "@dungeon/shared";
 
 const app = express();
 app.use(cors());
 app.get("/health", (_req, res) => res.json({ ok: true }));
+const webDir = fileURLToPath(new URL("../../web/dist/", import.meta.url));
+const indexHtml = path.join(webDir, "index.html");
+if (existsSync(indexHtml)) {
+  app.use(express.static(webDir));
+  app.get("*", (_req, res) => res.sendFile(indexHtml));
+} else {
+  console.warn(`No se encontró el frontend compilado en ${webDir}. Ejecutá "npm run build" desde la raíz.`);
+}
 const httpServer = createServer(app);
 const io = new Server(httpServer, { cors: { origin: process.env.WEB_ORIGIN?.split(",") ?? "*" } });
 
