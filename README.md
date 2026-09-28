@@ -1,6 +1,10 @@
 # Dungeon de Estudio
 
-MVP cooperativo para estudiar en salas temporales. El servidor es la fuente de verdad; en esta primera fase están implementados el lobby, las invitaciones, el QR, los roles, las reconexiones y la transferencia del creador.
+MVP cooperativo para estudiar en salas temporales. El servidor es la fuente de verdad; están implementados el lobby, las invitaciones, el QR, los roles, las reconexiones, la transferencia del creador y la fase de combate completa con carga de mazos.
+
+## Mazos de tarjetas
+
+El formato del archivo de mazo (JSON o CSV) está documentado en [FORMATO-MAZO.md](FORMATO-MAZO.md). Incluye la estructura, los límites exactos, las reglas que hacen que un mazo sea rechazado y un prompt listo para pegarle a una IA y pedirle que arme las tarjetas. Ese documento está atado al código por `apps/server/test/spec.test.mjs`: si cambia un límite o una regla, el test falla.
 
 ## Requisitos
 
