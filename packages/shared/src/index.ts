@@ -4,11 +4,11 @@ export const GAME_CONFIG = {
   nicknameMinLength: 2,
   nicknameMaxLength: 18,
   roomInactiveMs: 30 * 60 * 1000,
-  roles: ["Guerrero", "Mago", "Clérigo", "Ladrón", "Bardo"] as const,
+  roles: ["Guerrero", "Mago", "Clérigo", "Ladrón", "Bardo", "Paladín", "Explorador", "Alquimista"] as const,
   playerMaxHp: 3,
   promptPreviewSeconds: 10,
   questionTimeSeconds: 25,
-  extraTimeSeconds: 5,
+  bardAbilitySeconds: 10,
   answerRevealMs: 4500,
   minOptions: 2,
   maxOptions: 6,
@@ -27,12 +27,26 @@ export const ENEMIES = [
   { id: "dragon", name: "Dragón de Parciales", hp: 6, trait: null },
   { id: "spider", name: "Araña de Tinta", hp: 4, trait: null },
   { id: "mimic", name: "Cofre Tramposo", hp: 5, trait: null },
+  { id: "bruja", name: "Bruja de los Apuntes", hp: 5, trait: "mudo" },
+  { id: "troll", name: "Trol de Recuperatorio", hp: 8, trait: "blindado" },
+  { id: "cuervo", name: "Cuervo de Tinta", hp: 4, trait: null },
 ] as const satisfies readonly { id: string; name: string; hp: number; trait: string | null }[];
 
 export type Role = (typeof GAME_CONFIG.roles)[number];
 export type RoomStatus = "lobby" | "playing" | "results";
-export type Ability = "discard" | "evade" | "extend";
+export type Ability = "strike" | "discard" | "heal" | "evade" | "extend" | "ward" | "track" | "potion";
 export type Outcome = "won" | "lost" | "abandoned";
+
+export const ROLE_ABILITIES: Record<Role, Ability> = {
+  Guerrero: "strike", Mago: "discard", "Clérigo": "heal", Ladrón: "evade",
+  Bardo: "extend", "Paladín": "ward", Explorador: "track", Alquimista: "potion",
+};
+
+/** Preguntas completas que deben pasar antes de que cada poder vuelva a estar listo. */
+export const ABILITY_COOLDOWNS: Record<Role, number> = {
+  Guerrero: 3, Mago: 3, "Clérigo": 3, Ladrón: 2,
+  Bardo: 3, "Paladín": 4, Explorador: 3, Alquimista: 4,
+};
 
 export interface Card {
   id: string;
@@ -87,9 +101,11 @@ export interface GameState {
   current: PublicCard | null;
   answerStartsAt: number;
   deadline: number;
-  timeBonusMs: number;
   visibleOptions: number[] | null;
   usedAbilities: Record<string, Ability[]>;
+  turnNumber: number;
+  abilityReadyAt: Record<string, number>;
+  teamWard: boolean;
   startedAt: number;
   finishedAt: number | null;
   outcome: Outcome | null;
@@ -122,12 +138,14 @@ export type ClientEvents = {
   "room:create": (payload: { playerId: string; nickname: string }) => void;
   "room:join": (payload: { code: string; playerId: string; nickname: string }) => void;
   "room:reconnect": (payload: { code: string; playerId: string }) => void;
+  "room:leave": () => void;
   "player:role": (payload: { role: Role }) => void;
   /** Sin id: el servidor valida el mazo y le asigna los identificadores. */
   "deck:upload": (payload: { title: string; cards: Omit<Card, "id">[] }) => void;
   /** Sin playerId: el servidor lo toma de la sesión del socket, no del payload. */
   "game:start": () => void;
   "game:answer": (payload: { answer: number }) => void;
+  "game:forfeit": () => void;
   "game:ability": (payload: { ability: Ability }) => void;
   /** Vuelve al lobby desde la pantalla de resultados, para rearmar otra ronda. */
   "game:lobby": () => void;
@@ -139,5 +157,7 @@ export type ServerEvents = {
   "room:created": (payload: { code: string }) => void;
   "room:joined": (payload: { code: string }) => void;
   "room:closed": (payload: { code: string; message: string }) => void;
+  "room:left": () => void;
   "game:reveal": (reveal: Reveal) => void;
+  "game:ability": (announcement: { playerId: string; nickname: string; role: Role; ability: Ability }) => void;
 };

@@ -114,7 +114,7 @@ try {
   check("el rol no se puede cambiar con la partida en curso", () => assert.equal(beto().role, "Guerrero"));
 
   // El mazo de esta partida tiene la correcta en el índice 1, así que contestar 0
-  // falla siempre. Nadie sana: el Clérigo sólo cura al acertar, y así nadie acierta.
+  // falla siempre. Nadie sana: el equipo no activa el poder del Clérigo.
   for (let i = 0; i < 3; i++) {
     const hp = beto().hp;
     b.socket.emit("game:answer", { answer: 0 });
@@ -159,7 +159,7 @@ try {
   // carta y carta hay una pausa de reveal de varios segundos, de ahí el margen.
   const playUntil = Date.now() + 90000;
   while (a.room.status === "playing" && Date.now() < playUntil) {
-    if (a.room.game.deadline > Date.now()) a.socket.emit("game:answer", { answer: 0 });
+    if (a.room.game.answerStartsAt <= Date.now() && a.room.game.deadline > Date.now()) a.socket.emit("game:answer", { answer: 0 });
     await wait(150);
   }
   await until("fin por victoria", () => a.room.status === "results", 200);

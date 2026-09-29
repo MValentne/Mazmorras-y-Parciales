@@ -6,9 +6,10 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Server, type Socket } from "socket.io";
-import { GAME_CONFIG, type Ability, type ClientEvents, type Player, type Role, type ServerEvents } from "@dungeon/shared";
+import { GAME_CONFIG, ROLE_ABILITIES, type Ability, type ClientEvents, type Player, type Role, type ServerEvents } from "@dungeon/shared";
 import {
   clearTimers,
+  forfeitPlayer,
   handleAnswer,
   publicView,
   startGame,
@@ -49,6 +50,9 @@ function publish(room: GameRoom) {
 const hooks: EngineHooks = {
   onState: publish,
   onReveal: (room, reveal) => io.to(room.code).emit("game:reveal", reveal),
+  onAbility: (room, player, ability) => {
+    if (player.role) io.to(room.code).emit("game:ability", { playerId: player.id, nickname: player.nickname, role: player.role, ability });
+  },
   onError: (room, playerId, code, message) => {
     const socketId = room.sockets.get(playerId);
     if (socketId) error(socketId, code, message);
@@ -164,8 +168,39 @@ io.on("connection", (socket: Socket<ClientEvents, ServerEvents>) => {
     const id = socket.data.playerId as string | undefined;
     const room = code ? rooms.get(code) : undefined;
     const player = room && id ? findPlayer(room, id) : undefined;
-    return room && player ? { room, player } : null;
+    return room && player && id && room.sockets.get(id) === socket.id ? { room, player } : null;
   };
+
+  socket.on("game:forfeit", () => {
+    const ctx = roomOf(socket);
+    if (!ctx) return error(socket.id, "NOT_IN_ROOM", "No estás en una sala.");
+    if (ctx.room.status !== "playing") return error(socket.id, "NOT_IN_GAME", "No hay una partida en curso para abandonar.");
+    forfeitPlayer(ctx.room, hooks, ctx.player);
+  });
+
+  socket.on("room:leave", () => {
+    const ctx = roomOf(socket);
+    if (!ctx) return socket.emit("room:left");
+    const { room, player } = ctx;
+    if (room.status === "playing") forfeitPlayer(room, hooks, player);
+    room.sockets.delete(player.id);
+    socket.leave(room.code);
+    socket.data.playerId = undefined;
+    socket.data.roomCode = undefined;
+    room.players = room.players.filter((p) => p.id !== player.id);
+    if (room.creatorId === player.id) {
+      const successor = room.players.find((p) => p.online) ?? room.players[0];
+      if (successor) {
+        room.creatorId = successor.id;
+        for (const p of room.players) p.isCreator = p.id === successor.id;
+      }
+    }
+    if (!room.players.length) {
+      clearTimers(room);
+      rooms.delete(room.code);
+    } else publish(room);
+    socket.emit("room:left");
+  });
 
   socket.on("deck:upload", ({ title, cards }) => {
     const ctx = roomOf(socket);
@@ -201,7 +236,7 @@ io.on("connection", (socket: Socket<ClientEvents, ServerEvents>) => {
   socket.on("game:ability", ({ ability }) => {
     const ctx = roomOf(socket);
     if (!ctx) return;
-    if (!["discard", "evade", "extend"].includes(ability)) return error(socket.id, "INVALID_ABILITY", "Esa habilidad no existe.");
+    if (!Object.values(ROLE_ABILITIES).includes(ability)) return error(socket.id, "INVALID_ABILITY", "Esa habilidad no existe.");
     useAbility(ctx.room, hooks, ctx.player, ability as Ability);
   });
 

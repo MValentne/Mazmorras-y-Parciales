@@ -113,22 +113,24 @@ describe("publicView", () => {
 });
 
 describe("daño y mazo", () => {
-  it("el Guerrero pega 2 y la carta dominada sale del mazo", () => {
+  it("el Golpe demoledor del Guerrero agrega daño y la carta sale del mazo", () => {
     const { room, hooks, reveals } = started();
     const before = room.game.enemy.hp;
+    useAbility(room, hooks, room.players[0], "strike");
     handleAnswer(room, hooks, room.players[0], room.drawn.answer);
-    assert.equal(before - room.game.enemy.hp, 2);
+    assert.equal(before - room.game.enemy.hp, 3);
     assert.equal(room.game.mastered, 1);
     assert.equal(room.remaining.length, 3, "la carta dominada ya no está en el mazo");
     assert.equal(last(reveals).correct, true);
   });
 
-  it("el Golem blindado le baja el doble al Guerrero", () => {
+  it("el Golem blindado resiste parte del Golpe demoledor", () => {
     const { room, hooks } = started();
     room.game.enemy.trait = "blindado";
     const before = room.game.enemy.hp;
+    useAbility(room, hooks, room.players[0], "strike");
     handleAnswer(room, hooks, room.players[0], room.drawn.answer);
-    assert.equal(before - room.game.enemy.hp, 1);
+    assert.equal(before - room.game.enemy.hp, 2);
   });
 
   it("fallar cuesta 1 de vida, deja la pregunta abierta y no revela la respuesta", () => {
@@ -169,23 +171,21 @@ describe("habilidades", () => {
     assert.equal(room.game.visibleOptions.length, 2);
     assert.equal(room.game.visibleOptions.includes(room.drawn.answer), true);
     useAbility(room, hooks, room.players[0], "discard");
-    assert.equal(last(errors).code, "ABILITY_USED");
+    assert.equal(last(errors).code, "ABILITY_COOLDOWN");
   });
 
-  it("el Clérigo cura al compañero más herido al acertar", () => {
+  it("la Sanación mayor cura hasta 2 vidas al aliado más herido", () => {
     const { room, hooks, reveals } = started(["Clérigo", "Mago"]);
     room.players[1].hp = 1;
-    handleAnswer(room, hooks, room.players[0], room.drawn.answer);
-    assert.equal(room.players[1].hp, 2);
-    assert.equal(last(reveals).healedPlayer, "P1");
+    useAbility(room, hooks, room.players[0], "heal");
+    assert.equal(room.players[1].hp, 3);
   });
 
-  it("el Bardo suma tiempo a la siguiente pregunta", async () => {
+  it("el Crescendo del Bardo extiende la pregunta actual", () => {
     const { room, hooks } = started(["Bardo", "Mago"]);
-    handleAnswer(room, hooks, room.players[0], room.drawn.answer);
-    assert.equal(room.game.timeBonusMs, GAME_CONFIG.extraTimeSeconds * 1000);
-    await sleep(30);
-    assert.ok(room.game.deadline > Date.now() + 1000, "el deadline debería heredar el bonus");
+    const previous = room.game.deadline;
+    useAbility(room, hooks, room.players[0], "extend");
+    assert.equal(room.game.deadline - previous, GAME_CONFIG.bardAbilitySeconds * 1000);
   });
 
   it("una habilidad ajena al rol no hace nada", () => {

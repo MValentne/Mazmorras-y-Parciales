@@ -3,6 +3,7 @@ import QRCode from "qrcode";
 import { io, type Socket } from "socket.io-client";
 import {
   GAME_CONFIG,
+  ABILITY_COOLDOWNS,
   type Ability,
   type ClientEvents,
   type Reveal,
@@ -19,10 +20,25 @@ const getPlayerId = () => {
   return id;
 };
 const roleInfo: Record<Role, string> = {
-  Guerrero: "Más vida y daño extra al acertar.", Mago: "Puede descartar opciones incorrectas.",
-  "Clérigo": "Cura al compañero más herido al acertar.", Ladrón: "Puede evitar el daño de un fallo.", Bardo: "Al acertar, da más tiempo al grupo.",
+  Guerrero: "Golpe demoledor: +2 de daño en el próximo impacto.", Mago: "Ritual 50/50: descarta opciones hasta dejar dos.",
+  "Clérigo": "Sanación mayor: cura hasta 2 vidas a un aliado.", Ladrón: "Paso espectral: evita tu próximo fallo.",
+  Bardo: "Crescendo: suma 10 segundos a la pregunta actual.", "Paladín": "Muro sagrado: protege al grupo del próximo fallo.",
+  Explorador: "Rastreo: descarta una opción incorrecta.", Alquimista: "Tónico grupal: cura 1 vida a todo el equipo.",
 };
-const roleIcon: Record<Role, string> = { Guerrero: "⚔", Mago: "✧", "Clérigo": "✚", Ladrón: "◈", Bardo: "♫" };
+const abilityInfo: Record<Role, { ability: Ability; name: string; icon: string }> = {
+  Guerrero: { ability: "strike", name: "Golpe demoledor", icon: "⚔" },
+  Mago: { ability: "discard", name: "Ritual 50/50", icon: "✧" },
+  "Clérigo": { ability: "heal", name: "Sanación mayor", icon: "✚" },
+  Ladrón: { ability: "evade", name: "Paso espectral", icon: "◈" },
+  Bardo: { ability: "extend", name: "Crescendo", icon: "♫" },
+  "Paladín": { ability: "ward", name: "Muro sagrado", icon: "⬟" },
+  Explorador: { ability: "track", name: "Rastreo", icon: "➶" },
+  Alquimista: { ability: "potion", name: "Tónico grupal", icon: "⚗" },
+};
+const effectLabel: Partial<Record<Ability, string>> = {
+  strike: "GOLPE CARGADO", discard: "50/50 ACTIVO", evade: "ESQUIVE LISTO", ward: "MURO SAGRADO",
+  heal: "SANACIÓN USADA", track: "RASTREO ACTIVO", extend: "TIEMPO EXTRA", potion: "TÓNICO USADO",
+};
 const roleSpriteId = (role: Role | null) => role?.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase() ?? "unknown";
 const TRAIT_INFO: Record<string, string> = {
   mudo: "Mudo · muestra menos opciones",
@@ -30,7 +46,7 @@ const TRAIT_INFO: Record<string, string> = {
 };
 
 export default function App() {
-  const initialCode = useMemo(() => window.location.pathname.match(/^\/sala\/([^/]+)\/?$/i)?.[1]?.toUpperCase() ?? "", []);
+  const [initialCode, setInitialCode] = useState(() => window.location.pathname.match(/^\/sala\/([^/]+)\/?$/i)?.[1]?.toUpperCase() ?? "");
   const [socket, setSocket] = useState<Socket<ServerEvents, ClientEvents> | null>(null);
   const [room, setRoom] = useState<RoomState | null>(null);
   const [nickname, setNickname] = useState(localStorage.getItem("dungeon-nickname") ?? "");
@@ -42,6 +58,9 @@ export default function App() {
   const [myPick, setMyPick] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [deckBusy, setDeckBusy] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [leavingRoom, setLeavingRoom] = useState(false);
+  const [abilityNotice, setAbilityNotice] = useState<{ playerId: string; nickname: string; role: Role; ability: Ability } | null>(null);
   const playerId = useMemo(getPlayerId, []);
 
   useEffect(() => {
@@ -55,7 +74,13 @@ export default function App() {
     client.on("room:joined", ({ code: joinedCode }: { code: string }) => {
       setCode(joinedCode); setJoining(false); history.pushState({}, "", `/sala/${joinedCode}`);
     });
-    client.on("room:closed", (e: { message: string }) => { setError(e.message); setRoom(null); });
+    client.on("room:closed", (e: { message: string }) => {
+      setError(e.message); setRoom(null); setCode(""); setInitialCode(""); setMenuOpen(false); history.pushState({}, "", "/");
+    });
+    client.on("room:left", () => {
+      setRoom(null); setCode(""); setInitialCode(""); setError(""); setMenuOpen(false); setLeavingRoom(false);
+      sessionStorage.removeItem("dungeon-room-code"); history.pushState({}, "", "/");
+    });
     client.on("game:reveal", (r: Reveal) => {
       setReveal(r);
       window.setTimeout(() => {
@@ -63,6 +88,7 @@ export default function App() {
         setMyPick(null);
       }, GAME_CONFIG.answerRevealMs);
     });
+    client.on("game:ability", setAbilityNotice);
     client.on("connect", () => {
       const savedCode = sessionStorage.getItem("dungeon-room-code");
       const pathCode = window.location.pathname.match(/^\/sala\/([^/]+)\/?$/i)?.[1]?.toUpperCase();
@@ -72,6 +98,12 @@ export default function App() {
     client.connect();
     return () => { client.disconnect(); };
   }, [playerId]);
+
+  useEffect(() => {
+    if (!abilityNotice) return;
+    const timeout = window.setTimeout(() => setAbilityNotice(null), 3200);
+    return () => window.clearTimeout(timeout);
+  }, [abilityNotice]);
 
   useEffect(() => {
     if (room?.code) sessionStorage.setItem("dungeon-room-code", room.code);
@@ -108,7 +140,13 @@ export default function App() {
     try { await navigator.clipboard.writeText(`${location.origin}/sala/${room?.code}`); setError("Enlace copiado."); }
     catch { setError("No se pudo copiar automáticamente. Copiá el enlace de la barra del navegador."); }
   };
-  const backHome = () => { setRoom(null); setCode(""); setError(""); sessionStorage.removeItem("dungeon-room-code"); history.pushState({}, "", "/"); };
+  const backHome = () => { setRoom(null); setCode(""); setInitialCode(""); setError(""); sessionStorage.removeItem("dungeon-room-code"); history.pushState({}, "", "/"); };
+  const leaveRoom = () => {
+    if (leavingRoom) return;
+    if (!socket?.connected) { backHome(); return; }
+    setLeavingRoom(true);
+    socket.emit("room:leave");
+  };
 
   const uploadDeck = async (file: File) => {
     setError("");
@@ -131,27 +169,29 @@ export default function App() {
 
   if (room.status === "playing" && room.game) return (
     <main className="page game">
-      <header className="top"><div className="brand">✦ <span>Dungeon de Estudio</span></div><span className="live"><i/> Sala {room.code}</span></header>
-      <GameBoard room={room} meId={playerId} reveal={reveal} myPick={myPick} now={now} onPick={i => { setMyPick(i); socket?.emit("game:answer", { answer: i }); }} onAbility={a => socket?.emit("game:ability", { ability: a })} error={error}/>
+      <header className="top battle-nav"><div className="brand">✦ <span>Dungeon de Estudio</span></div><div className="battle-nav-actions"><span className="live"><i/> Sala {room.code}</span><button className="secondary nav-toggle" onClick={() => setMenuOpen(v => !v)} aria-expanded={menuOpen}>☰ Menú</button></div>
+        {menuOpen && <nav className="game-menu" aria-label="Menú de partida"><strong>¿Qué querés hacer?</strong><button disabled={me?.eliminated} onClick={() => { socket?.emit("game:forfeit"); setMenuOpen(false); }}>Abandonar el combate</button><small>Vas a quedar como espectador mientras el grupo sigue.</small><button className="leave-action" disabled={leavingRoom} onClick={leaveRoom}>{leavingRoom ? "Saliendo…" : "Salir de la sala"}</button></nav>}
+      </header>
+      <GameBoard room={room} meId={playerId} reveal={reveal} myPick={myPick} now={now} abilityNotice={abilityNotice} onPick={i => { setMyPick(i); socket?.emit("game:answer", { answer: i }); }} onAbility={a => socket?.emit("game:ability", { ability: a })} error={error}/>
     </main>
   );
 
   if (room.status === "results") return (
     <main className="page game">
       <header className="top"><div className="brand">✦ <span>Dungeon de Estudio</span></div><span className="live"><i/> Sala {room.code}</span></header>
-      <ResultsScreen room={room} meId={playerId} onAgain={() => socket?.emit("game:lobby")} canRestart={me?.isCreator ?? false} onHome={backHome}/>
+      <ResultsScreen room={room} meId={playerId} onAgain={() => socket?.emit("game:lobby")} canRestart={me?.isCreator ?? false} onHome={leaveRoom}/>
     </main>
   );
 
   const sinRol = room.players.filter(p => !p.role).length;
   const ready = Boolean(room.deck) && sinRol === 0;
-  return <main className="page lobby"><header className="top"><div className="brand">✦ <span>Dungeon de Estudio</span></div><span className="live"><i/> Sala activa</span></header>
+  return <main className="page lobby"><header className="top"><div className="brand">✦ <span>Dungeon de Estudio</span></div><div className="battle-nav-actions"><span className="live"><i/> Sala activa</span><button className="secondary nav-toggle" disabled={leavingRoom} onClick={leaveRoom}>{leavingRoom ? "Saliendo…" : "Salir de la sala"}</button></div></header>
     <div className="lobby-grid"><section className="panel invite-card"><p className="eyebrow">LOBBY · COMPARTÍ LA INVITACIÓN</p><h1>La mazmorra<br/>se prepara</h1><div className="code-label">CÓDIGO DE SALA</div><div className="code">{room.code.split("").join(" ")}</div><button className="primary full" onClick={copyInvite}>Copiar enlace de invitación</button><p className="url">{inviteUrl}</p>{qr && <div className="qr-frame"><img src={qr} alt={`Código QR para entrar a la sala ${room.code}`}/><span>Escaneá para entrar</span></div>}<p className="small-note">Cualquiera con el enlace puede unirse mientras la sala esté abierta.</p></section>
       <section className="panel party-card"><div className="section-heading"><div><p className="eyebrow">EL GRUPO</p><h2>Jugadores <span className="count">{room.players.length}/{GAME_CONFIG.maxPlayers}</span></h2></div><span className="creator-note">{me?.isCreator ? "Sos el creador" : "Lobby de la partida"}</span></div>
         <ul className="players">{room.players.map(p => <li key={p.id} className={!p.online ? "offline" : ""}><div className={`avatar character-sprite role-${roleSpriteId(p.role)}`} aria-label={p.role ?? "Aventurero"}>
           <svg viewBox="0 0 64 64" aria-hidden="true"><use href={`/sprites.svg#hero-${roleSpriteId(p.role)}`} /></svg>
         </div><div className="player-name">{p.nickname}{p.isCreator && <span className="host-badge">CREADOR</span>}<small>{p.online ? "En la sala" : "Reconectando…"}</small></div><span className={`role-pill ${p.role ? "selected" : ""}`}>{p.role ?? "Eligiendo rol"}</span></li>)}</ul>
-        <div className="role-select"><p className="eyebrow">ELEGÍ TU ROL</p><div className="roles">{GAME_CONFIG.roles.map(role => <button key={role} className={`role-card ${me?.role === role ? "active" : ""}`} onClick={() => chooseRole(role)} aria-pressed={me?.role === role}><span className="role-icon">{roleIcon[role]}</span><strong>{role}</strong><small>{roleInfo[role]}</small></button>)}</div></div>
+        <div className="role-select"><p className="eyebrow">ELEGÍ TU ROL</p><div className="roles">{GAME_CONFIG.roles.map(role => <button key={role} className={`role-card ${me?.role === role ? "active" : ""}`} onClick={() => chooseRole(role)} aria-pressed={me?.role === role}><span className={`role-icon role-${roleSpriteId(role)}`}><svg viewBox="0 0 64 64" aria-hidden="true"><use href={`/sprites.svg#hero-${roleSpriteId(role)}`} /></svg></span><strong>{role}</strong><small>{roleInfo[role]}<em>Enfriamiento: {ABILITY_COOLDOWNS[role]} preguntas</em></small></button>)}</div></div>
         <DeckLoader room={room} busy={deckBusy} disabled={!me?.isCreator} onFile={uploadDeck}/>
         {error && <p role="status" className="message">{error}</p>}
         {me?.isCreator
@@ -184,8 +224,9 @@ function DeckLoader({ room, busy, disabled, onFile }: { room: RoomState; busy: b
   </div>;
 }
 
-function GameBoard({ room, meId, reveal, myPick, now, onPick, onAbility, error }: {
+function GameBoard({ room, meId, reveal, myPick, now, abilityNotice, onPick, onAbility, error }: {
   room: RoomState; meId: string; reveal: Reveal | null; myPick: number | null; now: number;
+  abilityNotice: { playerId: string; nickname: string; role: Role; ability: Ability } | null;
   onPick: (i: number) => void; onAbility: (a: Ability) => void; error: string;
 }) {
   const game = room.game!;
@@ -196,10 +237,15 @@ function GameBoard({ room, meId, reveal, myPick, now, onPick, onAbility, error }
   const total = preview ? GAME_CONFIG.promptPreviewSeconds * 1000 : Math.max(1, game.deadline - game.answerStartsAt);
   const left = Math.max(0, preview ? game.answerStartsAt - now : game.deadline - now);
   const shown = game.visibleOptions ?? game.current?.options.map((_, i) => i) ?? [];
-  const shield = game.usedAbilities[meId]?.includes("evade") ?? false;
   const canAct = !me?.eliminated && !closed && !preview;
+  const myAbility = me?.role ? abilityInfo[me.role] : null;
+  const myActiveEffects = game.usedAbilities[meId] ?? [];
+  const abilityCooldown = me ? Math.max(0, (game.abilityReadyAt[me.id] ?? 0) - game.turnNumber - 1) : 0;
+  const abilityNeedsMoreOptions = myAbility?.ability === "discard" || myAbility?.ability === "track";
+  const abilityReady = canAct && abilityCooldown === 0 && (!abilityNeedsMoreOptions || shown.length > 2);
 
   return <div className="board">
+    {abilityNotice && <div key={`${abilityNotice.playerId}-${abilityNotice.ability}-${game.turnNumber}`} className="ability-announcement" role="status"><span>{abilityInfo[abilityNotice.role].icon}</span><div><strong>{abilityNotice.nickname}</strong> activó <b>{abilityInfo[abilityNotice.role].name}</b></div></div>}
     <section className="panel enemy-card">
       {enemy && <>
         <div className={`enemy-art ${reveal?.correct ? "struck" : reveal && !reveal.timeUp ? "attacking" : ""}`} data-enemy={enemy.id} role="img" aria-label={enemy.name}>
@@ -235,9 +281,9 @@ function GameBoard({ room, meId, reveal, myPick, now, onPick, onAbility, error }
         <strong>{reveal.correct ? "¡Dominada!" : reveal.timeUp ? "Se acabó el tiempo" : "Fallaste"}</strong>
         {reveal.answer !== null && <span>Correcta: {game.current?.options[reveal.answer]}</span>}
         {reveal.correct && reveal.damage > 0 && <span>−{reveal.damage} de vida al enemigo</span>}
-        {reveal.timeUp && <span>Se agotó el tiempo: cada aventurero perdió 1 vida.</span>}
+        {reveal.timeUp && <span>{reveal.damage === 0 ? "El Muro Sagrado bloqueó el daño para todo el grupo." : "Se agotó el tiempo: cada aventurero perdió 1 vida."}</span>}
         {reveal.healedPlayer && <span>{reveal.healedPlayer} recuperó {reveal.healedAmount} de vida</span>}
-        {!reveal.correct && !reveal.timeUp && reveal.damage === 0 && <span>Tu escudo absorbió el golpe</span>}
+        {!reveal.correct && !reveal.timeUp && reveal.damage === 0 && <span>Una protección anuló el daño.</span>}
         {reveal.explanation && <p>{reveal.explanation}</p>}
       </div>}
       {error && <p role="status" className="message">{error}</p>}
@@ -245,22 +291,25 @@ function GameBoard({ room, meId, reveal, myPick, now, onPick, onAbility, error }
 
     <section className="panel crew-card">
       <p className="eyebrow">EL GRUPO</p>
-      <ul className="crew">{room.players.map(p => <li key={p.id} className={`${!p.online ? "offline" : ""} ${p.eliminated ? "down" : ""}`}>
+      <ul className="crew">{room.players.map(p => <li key={p.id} className={`${!p.online ? "offline" : ""} ${p.eliminated ? "down" : p.hp <= 1 ? "critical" : p.hp < p.maxHp ? "wounded" : ""}`}>
         <div className={`avatar character-sprite role-${roleSpriteId(p.role)}`} aria-label={p.role ?? "Aventurero"}>
           <svg viewBox="0 0 64 64" aria-hidden="true"><use href={`/sprites.svg#hero-${roleSpriteId(p.role)}`} /></svg>
           {reveal?.healedPlayer === p.nickname && <i className="effect-heal" aria-hidden="true">＋</i>}
           {reveal && !reveal.correct && <i className="effect-damage" aria-hidden="true">✦</i>}
         </div>
         <div className="crew-name"><strong>{p.nickname}</strong><small>{p.role ?? "sin rol"}</small></div>
-        <div className="pips">{Array.from({ length: p.maxHp }, (_, i) => <i key={i} className={i < p.hp ? "on" : ""}/>)}</div>
+        <div className={`vitality ${p.eliminated ? "knocked-out" : p.hp <= 1 ? "danger" : p.hp < p.maxHp ? "hurt" : "steady"}`} role="img" aria-label={`Vitalidad de ${p.nickname}: ${p.eliminated ? "caído" : p.hp <= 1 ? "en peligro" : p.hp < p.maxHp ? "herido" : "firme"}`}>
+          <span className="hearts">{Array.from({ length: p.maxHp }, (_, i) => <i key={i} className={i < p.hp ? "heart full" : "heart empty"} aria-hidden="true">{i < p.hp ? "♥" : "♡"}</i>)}</span>
+          <small>{p.eliminated ? "CAÍDO" : p.hp <= 1 ? "EN PELIGRO" : p.hp < p.maxHp ? "HERIDO" : "FIRME"}</small>
+        </div>
+        {(game.usedAbilities[p.id] ?? []).filter(ability => effectLabel[ability]).map(ability => <span key={ability} className="crew-effect">{effectLabel[ability]}</span>)}
         {p.eliminated && <span className="down-tag">CAÍDO</span>}
       </li>)}</ul>
       <div className="abilities">
-        {me?.role === "Mago" && <button className="ability" disabled={!canAct} onClick={() => onAbility("discard")}>✧ Recortar a 50/50</button>}
-        {me?.role === "Ladrón" && <button className={`ability ${shield ? "armed" : ""}`} disabled={!canAct || shield} onClick={() => onAbility("evade")}>◈ {shield ? "Escudo listo" : "Escudo anti-fallo"}</button>}
-        {me?.role === "Guerrero" && <span className="ability-note">⚔ Doble daño al acertar</span>}
-        {me?.role === "Clérigo" && <span className="ability-note">✚ Cura al más herido al acertar</span>}
-        {me?.role === "Bardo" && <span className="ability-note">♫ +{GAME_CONFIG.extraTimeSeconds}s al acertar</span>}
+        {myAbility && <button className={`ability ${myActiveEffects.includes(myAbility.ability) || (myAbility.ability === "ward" && game.teamWard) ? "armed" : ""}`} disabled={!abilityReady} onClick={() => onAbility(myAbility.ability)}>
+          {myAbility.icon} {myAbility.name}{abilityCooldown > 0 ? ` · ${abilityCooldown} preguntas` : abilityNeedsMoreOptions && shown.length <= 2 ? " · necesita 3 opciones" : " · LISTO"}
+        </button>}
+        {game.teamWard && <span className="team-effect">⬟ Muro Sagrado protege al grupo</span>}
         {me?.eliminated && <span className="ability-note down">Caíste: quedás de espectadora</span>}
       </div>
     </section>

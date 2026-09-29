@@ -66,10 +66,14 @@ button:disabled { opacity: .55; cursor: wait; }
 .role-pill { color: #a7a091; font-size: 10px; padding: 5px 8px; border: 1px solid #51493c; border-radius: 20px; }
 .role-pill.selected { color: #e3c77d; border-color: #72603a; }
 .role-select { border-top: 1px solid #40392d; padding-top: 17px; }
-.roles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+.roles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
 .role-card { min-width: 0; min-height: 115px; text-align: left; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; color: #e9e2d3; background: #211e18; border: 1px solid #51493c; border-radius: 7px; padding: 9px 8px; }
 .role-card:hover, .role-card.active { border-color: #c3a057; background: #302819; }
 .role-icon { font-size: 19px; color: #d9b568; height: 23px; }
+.role-icon { display: block; width: 46px; height: 46px; border: 1px solid #625137; border-radius: 10px; background: radial-gradient(circle, #635031, #211e18 70%); }
+.role-icon svg { width: 100%; height: 100%; image-rendering: pixelated; filter: drop-shadow(0 2px 2px #0009); }
+.role-card small em { display: block; margin-top: 4px; color: #dfba6e; font: 700 8px/1.25 ui-monospace, monospace; }
+.lobby .role-card { min-height: 150px; }
 .role-card strong { font-size: 11px; }
 .role-card small { font-size: 9px; line-height: 1.35; color: #b2aa9b; }
 .waiting { display: flex; align-items: center; justify-content: center; gap: 8px; color: #b3a991; font-size: 12px; border-top: 1px solid #40392d; margin-top: 18px; padding-top: 18px; }
@@ -92,7 +96,8 @@ button:disabled { opacity: .55; cursor: wait; }
   .party-card { padding: 18px; }
   .roles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .role-card { min-height: 88px; }
-  .role-card:last-child { grid-column: 1 / -1; }
+  .lobby .role-card { min-height: 128px; }
+  .role-icon { width: 40px; height: 40px; }
   .section-heading h2 { font-size: 18px; }
 }
 @media (max-width: 390px) {
@@ -208,6 +213,9 @@ button:disabled { opacity: .55; cursor: wait; }
 .enemy-art[data-enemy="dragon"] { background: radial-gradient(ellipse, #b84d385c, #11100d 70%); }
 .enemy-art[data-enemy="spider"] { background: radial-gradient(ellipse, #a7477555, #11100d 70%); }
 .enemy-art[data-enemy="mimic"] { background: radial-gradient(ellipse, #ba8e3d55, #11100d 70%); }
+.enemy-art[data-enemy="bruja"] { background: radial-gradient(ellipse, #795cb477, #11100d 70%); }
+.enemy-art[data-enemy="troll"] { background: radial-gradient(ellipse, #7f9e4e66, #11100d 70%); }
+.enemy-art[data-enemy="cuervo"] { background: radial-gradient(ellipse, #587e9d66, #11100d 70%); }
 .enemy-art.struck .enemy-sprite { animation: sprite-hit .48s ease-out; }
 .enemy-art.attacking .enemy-sprite { animation: sprite-attack .42s ease-in-out; }
 .impact { position: absolute; z-index: 2; font-size: 37px; line-height: 1; pointer-events: none; }
@@ -224,6 +232,9 @@ button:disabled { opacity: .55; cursor: wait; }
 .role-clerico { box-shadow: 0 0 15px #75bd8840; }
 .role-ladron { box-shadow: 0 0 15px #64b6d240; }
 .role-bardo { box-shadow: 0 0 15px #dfb65b40; }
+.role-paladin { box-shadow: 0 0 15px #dfc36b40; }
+.role-explorador { box-shadow: 0 0 15px #79a85d40; }
+.role-alquimista { box-shadow: 0 0 15px #a179b140; }
 .option.correct { animation: answer-success .55s ease-out; }
 .option.wrong { animation: answer-fail .38s ease-in-out; }
 .ability:not(:disabled):active { transform: scale(.96); }
@@ -248,7 +259,7 @@ button:disabled { opacity: .55; cursor: wait; }
 .game .brand { display: flex; align-items: center; gap: 9px; font-size: 17px; text-shadow: 0 2px #000; }
 .game .brand:first-letter { font-size: 24px; }
 .game .live { padding: 7px 12px; border: 1px solid #75603b; border-radius: 20px; background: #17130fc9; color: #e2cf9e; box-shadow: 0 3px 8px #0007; }
-.board { max-width: 1040px; margin: 0 auto; grid-template-columns: 1fr; gap: 15px; }
+.board { position: relative; max-width: 1040px; margin: 0 auto; grid-template-columns: 1fr; gap: 15px; }
 .enemy-card { grid-column: 1; grid-row: 1; position: relative; display: grid; grid-template-columns: 1fr minmax(230px, 35%); align-items: start; min-height: 335px; padding: 20px 26px; overflow: hidden; text-align: left; border: 2px solid #705331; border-radius: 17px; background: linear-gradient(180deg, #222b36 0%, #303039 45%, #514033 46%, #33261b 72%, #17130f 100%); box-shadow: 0 8px 0 #100d0a, 0 16px 34px #0009, inset 0 0 50px #161116; }
 .enemy-card::before { content: ""; position: absolute; inset: 0; pointer-events: none; opacity: .45; background: radial-gradient(ellipse at 50% 35%, #e2b86b37, transparent 48%), repeating-linear-gradient(165deg, transparent 0 33px, #d8bc8720 34px 36px), linear-gradient(90deg, #17120d88, transparent 30% 70%, #17120d88); }
 .enemy-card::after { content: ""; position: absolute; inset: auto 0 0; height: 50px; opacity: .65; background: repeating-linear-gradient(90deg, #18120c 0 54px, #503a22 55px 60px, #251c13 61px 110px); border-top: 4px solid #685034; }
@@ -340,3 +351,55 @@ button:disabled { opacity: .55; cursor: wait; }
   .game .brand { font-size: 14px; }
   .game .live { font-size: 9px; padding: 6px 8px; }
 }
+
+/* Navegación y vitalidad del grupo */
+.battle-nav { position: relative; z-index: 10; }
+.battle-nav-actions { display: flex; align-items: center; gap: 9px; }
+.nav-toggle { padding: 7px 11px; font-size: 11px; }
+.game-menu { position: absolute; top: calc(100% - 4px); right: 0; z-index: 20; display: grid; gap: 8px; width: min(280px, calc(100vw - 30px)); padding: 14px; border: 1px solid #9b7945; border-radius: 11px; background: linear-gradient(145deg, #30271c, #17130f); box-shadow: 0 12px 32px #000c, inset 0 1px #fff2; animation: reveal-in .16s ease-out both; }
+.game-menu strong { color: #f1d79c; font: 700 14px Georgia, serif; }
+.game-menu button { padding: 10px 12px; border: 1px solid #655133; border-radius: 7px; background: #3b3021; color: #eee1c6; text-align: left; font-size: 12px; font-weight: 700; }
+.game-menu button:hover:not(:disabled) { border-color: #d3ac61; background: #4a3923; }
+.game-menu button.leave-action { border-color: #744038; background: #3a211e; color: #f0c4b7; }
+.game-menu small { margin: -5px 2px 2px; color: #a99d88; font-size: 10px; line-height: 1.4; }
+.crew li.wounded { border-color: #83633a; }
+.crew li.critical { border-color: #a4483d; background: linear-gradient(135deg, #3d211e, #211714); box-shadow: inset 0 0 18px #9f382729, 0 0 12px #b7443030; animation: danger-aura 1.6s ease-in-out infinite alternate; }
+.vitality { display: grid; justify-items: end; gap: 3px; min-width: 62px; }
+.hearts { display: flex; gap: 2px; white-space: nowrap; }
+.heart { font: normal 18px/1 system-ui, sans-serif; transition: transform .2s, color .2s, filter .2s; }
+.heart.full { color: #e8584d; filter: drop-shadow(0 1px 2px #0009) drop-shadow(0 0 4px #b3352780); text-shadow: 0 1px #591e19; }
+.heart.empty { color: #79685c; text-shadow: 0 1px #000; }
+.vitality small { color: #bba77e; font: 700 8px ui-monospace, monospace; letter-spacing: .08em; }
+.vitality.hurt .heart.full { color: #ed9a4a; }
+.vitality.danger .heart.full { color: #ff6250; animation: heart-beat .85s ease-in-out infinite; }
+.vitality.knocked-out .heart { color: #635c57; filter: grayscale(1); }
+.vitality.knocked-out small { color: #dc8174; }
+.effect-damage { animation: damage-pop .6s ease-out both; }
+.effect-heal { animation: heal-pop .8s ease-out both; }
+@keyframes heart-beat { 50% { transform: scale(1.28); filter: drop-shadow(0 0 7px #ff4435); } }
+@keyframes danger-aura { to { box-shadow: inset 0 0 23px #9f38274a, 0 0 17px #b7443050; } }
+@keyframes damage-pop { 0% { transform: scale(.6) translateY(5px); opacity: 0; } 35% { transform: scale(1.35) translateY(-3px); opacity: 1; } 100% { transform: scale(1) translateY(-18px); opacity: 0; } }
+@keyframes heal-pop { 0% { transform: scale(.5) translateY(5px); opacity: 0; } 35% { transform: scale(1.3) translateY(-4px); opacity: 1; } 100% { transform: scale(1) translateY(-22px); opacity: 0; } }
+@media (max-width: 520px) {
+  .battle-nav-actions { gap: 6px; }
+  .nav-toggle { padding: 6px 8px; font-size: 10px; }
+  .vitality { min-width: 0; }
+  .heart { font-size: 15px; }
+  .vitality small { font-size: 7px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .crew li.critical, .vitality.danger .heart.full, .effect-damage, .effect-heal, .game-menu { animation: none !important; }
+}
+.ability-announcement { position: absolute; z-index: 12; top: -8px; left: 50%; display: flex; align-items: center; gap: 11px; min-width: min(340px, calc(100vw - 36px)); padding: 11px 16px; transform: translateX(-50%); border: 1px solid #e1bd72; border-radius: 12px; color: #f8e8bd; background: linear-gradient(135deg, #4c3820ee, #211a12f2); box-shadow: 0 0 0 3px #e1bd7230, 0 8px 28px #000c; animation: ability-flare .55s cubic-bezier(.2,.8,.2,1) both; pointer-events: none; }
+.ability-announcement > span { display: grid; place-items: center; flex: 0 0 38px; width: 38px; height: 38px; border: 1px solid #d5ae63; border-radius: 50%; color: #ffe39e; background: #816331; font-size: 22px; box-shadow: 0 0 16px #f6ca685c; }
+.ability-announcement div { font-size: 12px; }
+.ability-announcement strong, .ability-announcement b { color: #ffe19a; }
+.crew-effect { position: absolute; top: -7px; right: 6px; z-index: 2; padding: 3px 5px; border: 1px solid #d0a54f; border-radius: 5px; color: #ffe2a0; background: #49371f; font: 700 7px ui-monospace, monospace; box-shadow: 0 2px 5px #0008; }
+.team-effect { padding: 8px 11px; border: 1px solid #73958b; border-radius: 8px; color: #c8e4db; background: #1b302c; font-size: 10px; font-weight: 800; animation: team-flare .5s ease-out both; }
+.team-effect.ranger { border-color: #87a963; color: #d6edaf; background: #29371e; }
+.abilities .ability { min-width: min(230px, 100%); }
+.abilities .ability:disabled { filter: saturate(.55); }
+@keyframes ability-flare { 0% { opacity: 0; transform: translate(-50%, -14px) scale(.9); } 65% { opacity: 1; transform: translate(-50%, 2px) scale(1.03); } 100% { transform: translate(-50%, 0) scale(1); } }
+@keyframes team-flare { 0% { opacity: .45; transform: translateY(5px) scale(.95); } 70% { opacity: 1; transform: translateY(-2px) scale(1.03); } 100% { transform: none; } }
+@media (max-width: 520px) { .ability-announcement { top: 2px; padding: 8px 10px; } .ability-announcement > span { flex-basis: 32px; width: 32px; height: 32px; font-size: 18px; } }
+@media (prefers-reduced-motion: reduce) { .ability-announcement, .team-effect, .crew li.critical, .vitality.danger .heart.full { animation: none !important; } }
