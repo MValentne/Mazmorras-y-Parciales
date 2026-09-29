@@ -232,11 +232,11 @@ function clearQuestion(room: GameRoom) {
 
 function narrow(visible: number[], answer: number, keep: number) {
   const wrong = shuffle(visible.filter((i) => i !== answer));
-  return [...wrong.slice(0, keep - 1), answer].sort((a, b) => a - b);
+  return shuffle([...wrong.slice(0, keep - 1), answer]);
 }
 
 function visibleFor(room: GameRoom, card: Card): number[] {
-  let visible = card.options.map((_, i) => i);
+  let visible = shuffle(card.options.map((_, i) => i));
   if (room.game?.enemy?.trait === "mudo" && visible.length > GAME_CONFIG.mutedEnemyOptions) {
     visible = narrow(visible, card.answer, GAME_CONFIG.mutedEnemyOptions);
   }

@@ -334,12 +334,12 @@ function GameBoard({ room, meId, reveal, myPick, now, abilityNotice, shopNotice,
         <p className="prompt">{game.current.prompt}</p>
         {preview
           ? <div className="preview-hint"><span aria-hidden="true">◷</span> Leé la pregunta. Las opciones aparecen en {Math.ceil(left / 1000)} segundos.</div>
-          : <ul className="options">{shown.map(i => {
+          : <ul className="options">{shown.map((i, position) => {
           const isCorrect = reveal?.answer === i;
           const isMyWrong = reveal && myPick === i && !reveal.correct;
           return <li key={i}>
             <button className={`option ${isCorrect ? "correct" : ""} ${isMyWrong ? "wrong" : ""} ${myPick === i && reveal?.correct ? "hit" : ""}`} disabled={closed || !canAct} onClick={() => onPick(i)}>
-              <span className="opt-index">{String.fromCharCode(65 + i)}</span>{game.current!.options[i]}
+              <span className="opt-index">{String.fromCharCode(65 + position)}</span>{game.current!.options[i]}
             </button>
           </li>;
         })}</ul>}

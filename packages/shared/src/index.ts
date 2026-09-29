@@ -22,7 +22,7 @@ export const GAME_CONFIG = {
   maxSceneSettingLength: 100,
   maxSceneObjectiveLength: 180,
   maxSceneBeatTitleLength: 70,
-  maxSceneBeatTextLength: 280,
+  maxSceneBeatTextLength: 600,
   sceneBeatCount: { min: 2, max: 4 },
   mazeDepths: [40, 60, 80, 100],
 } as const;

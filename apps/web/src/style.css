@@ -553,21 +553,21 @@ button:disabled { opacity: .55; cursor: wait; }
 .scene-card { padding: clamp(18px, 4vw, 34px); border: 2px solid #705331; border-radius: 4px; background: linear-gradient(145deg, #28231a, #1b1813); box-shadow: 0 6px 0 #100d0a, 0 14px 28px #0007; }
 .scene-heading { padding-bottom: 18px; border-bottom: 1px solid #55452d; }
 .scene-heading .eyebrow { margin: 0 0 14px; color: #d5b866; }
-.scene-setting { margin: 0 0 7px; color: #ad9870; font: 400 12px var(--font-pixel); }
-.scene-heading h1 { margin: 0; color: #f0d989; font: 400 clamp(25px, 4vw, 38px)/1.25 var(--font-pixel); }
+.scene-setting { margin: 0 0 7px; color: #c7b58e; font-size: 14px; line-height: 1.5; }
+.scene-heading h1 { margin: 0; color: #f0d989; font: 700 clamp(26px, 4vw, 40px)/1.25 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
 .scene-objective { display: flex; align-items: baseline; gap: 12px; margin: 17px 0; padding: 12px 15px; border-left: 3px solid #c39b52; background: #302718; }
-.scene-objective > span { flex: 0 0 auto; color: #e1c47d; font: 400 11px var(--font-pixel); }
-.scene-objective p { margin: 0; color: #e4d9bd; font-size: 13px; line-height: 1.55; }
+.scene-objective > span { flex: 0 0 auto; color: #e1c47d; font-size: 12px; font-weight: 700; letter-spacing: .08em; }
+.scene-objective p { margin: 0; color: #f0e7d4; font-size: 16px; line-height: 1.65; }
 .scene-beats { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 9px; }
 .scene-beats article { display: grid; grid-template-columns: 30px 1fr; gap: 9px; min-height: 120px; padding: 14px; border: 1px solid #484034; background: #201d18; }
 .beat-number { color: #b69657; font: 400 12px var(--font-pixel); }
-.scene-beats h2 { margin: 0 0 7px; color: #eee3c8; font: 400 14px/1.4 var(--font-pixel); }
-.scene-beats p { margin: 0; color: #b9b1a2; font-size: 12px; line-height: 1.65; }
+.scene-beats h2 { margin: 0 0 7px; color: #eee3c8; font: 700 17px/1.4 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.scene-beats p { margin: 0; color: #d0c8b9; font-size: 15px; line-height: 1.7; }
 .scene-controls { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 18px; padding-top: 15px; border-top: 1px solid #40392d; }
 .scene-controls .primary { min-width: min(250px, 100%); }
-.scene-controls p { margin: 0; color: #b9ad94; font: 400 12px var(--font-pixel); text-align: right; }
+.scene-controls p { margin: 0; color: #c7bda9; font-size: 14px; line-height: 1.5; text-align: right; }
 .scene-roster { display: flex; flex-wrap: wrap; gap: 8px; }
-.scene-roster > div { display: flex; align-items: center; gap: 8px; min-width: 150px; padding: 7px 10px; border: 1px solid #40392d; background: #201d18; color: #d9d0bf; font-size: 11px; }
+.scene-roster > div { display: flex; align-items: center; gap: 8px; min-width: 150px; padding: 7px 10px; border: 1px solid #40392d; background: #201d18; color: #e4dccd; font-size: 13px; }
 .scene-roster-face { display: block; width: 34px; height: 34px; overflow: hidden; border: 1px solid #625137; background: #302719; image-rendering: pixelated; }
 .scene-roster > div > span:nth-child(2) { flex: 1; }
 .scene-roster small { display: block; margin-top: 3px; color: #958c7d; font-size: 9px; }
