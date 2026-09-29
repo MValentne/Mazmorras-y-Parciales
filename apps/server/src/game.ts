@@ -100,13 +100,19 @@ const alive = (room: GameRoom) => room.players.filter((p) => !p.eliminated);
 /**
  * Cierra la partida si corresponde. Si el equipo cae entero, pausa el combate en
  * una tienda de emergencia para que pueda comprar una resurrección.
- * @returns true si la partida terminó.
+ * @returns true si terminó o quedó pausada en la tienda de emergencia.
  */
 function settle(room: GameRoom, hooks: EngineHooks) {
   if (!room.players.some((p) => p.online)) return finish(room, hooks, "abandoned"), true;
   if (!alive(room).length) {
     const g = room.game;
     if (g) {
+      const canAffordRevival = room.players.some((player) => player.coins >= 3);
+      if (!canAffordRevival && g.emergencyRescueGranted) return finish(room, hooks, "lost"), true;
+      if (!canAffordRevival && !g.emergencyRescueGranted) {
+        for (const player of room.players) player.coins = Math.max(3, player.coins);
+        g.emergencyRescueGranted = true;
+      }
       if (!g.shopOpen) {
         clearTimers(room);
         if (room.drawn && !room.remaining.some((card) => card.id === room.drawn?.id)) room.remaining.push(room.drawn);
@@ -363,6 +369,7 @@ export function startGame(room: GameRoom, hooks: EngineHooks) {  if (room.status
     outcome: null,
     shopOpen: false,
     bonusDamage: 0,
+    emergencyRescueGranted: false,
   };
   spawnEnemy(room);
   dealCard(room, hooks);
@@ -481,7 +488,7 @@ export function continueFromShop(room: GameRoom, hooks: EngineHooks, player: Pla
   if (!player.isCreator) return hooks.onError(room, player.id, "NOT_CREATOR", "Solo quien creó la sala puede cerrar la tienda.");
   if (!alive(room).length) return hooks.onError(room, player.id, "PARTY_DOWN", "Reviví al menos a un aventurero antes de seguir.");
   g.shopOpen = false;
-  spawnEnemy(room);
+  if (!g.enemy) spawnEnemy(room);
   dealCard(room, hooks);
 }
 

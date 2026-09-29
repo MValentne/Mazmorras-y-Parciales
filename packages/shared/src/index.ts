@@ -112,6 +112,7 @@ export interface GameState {
   outcome: Outcome | null;
   shopOpen: boolean;
   bonusDamage: number;
+  emergencyRescueGranted: boolean;
 }
 
 export interface RoomState {

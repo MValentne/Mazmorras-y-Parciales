@@ -54,6 +54,7 @@ export default function App() {
   const [initialCode, setInitialCode] = useState(() => window.location.pathname.match(/^\/sala\/([^/]+)\/?$/i)?.[1]?.toUpperCase() ?? "");
   const [socket, setSocket] = useState<Socket<ServerEvents, ClientEvents> | null>(null);
   const [room, setRoom] = useState<RoomState | null>(null);
+  const [pendingRole, setPendingRole] = useState<Role | null>(null);
   const [nickname, setNickname] = useState(localStorage.getItem("dungeon-nickname") ?? "");
   const [code, setCode] = useState(initialCode);
   const [error, setError] = useState("");
@@ -68,6 +69,11 @@ export default function App() {
   const [abilityNotice, setAbilityNotice] = useState<{ playerId: string; nickname: string; role: Role; ability: Ability } | null>(null);
   const [shopNotice, setShopNotice] = useState<{ coinsAwarded: number; enemiesDefeated: number } | null>(null);
   const playerId = useMemo(getPlayerId, []);
+
+  useEffect(() => {
+    const role = room?.players.find(player => player.id === playerId)?.role ?? null;
+    setPendingRole(role);
+  }, [room?.code, room?.players, playerId]);
 
   useEffect(() => {
     const client: Socket<ServerEvents, ClientEvents> = io(SERVER_URL, { autoConnect: false, reconnection: true });
@@ -142,7 +148,10 @@ export default function App() {
     if (create) socket.emit("room:create", { playerId, nickname: name });
     else socket.emit("room:join", { code, playerId, nickname: name });
   };
-  const chooseRole = (role: Role) => socket?.emit("player:role", { role });
+  const chooseRole = (role: Role) => {
+    setPendingRole(role);
+    socket?.emit("player:role", { role });
+  };
   const copyInvite = async () => {
     try { await navigator.clipboard.writeText(`${location.origin}/sala/${room?.code}`); setError("Enlace copiado."); }
     catch { setError("No se pudo copiar automáticamente. Copiá el enlace de la barra del navegador."); }
@@ -164,19 +173,25 @@ export default function App() {
     socket?.emit("deck:upload", { title: result.title, cards: result.cards });
   };
 
-  if (!room) return <main className="page home"><div className="sigil">✦</div><p className="eyebrow">UNA AVENTURA COOPERATIVA</p><h1>Dungeon <span>de Estudio</span></h1><p className="intro">Reúnan al grupo, afilen la memoria y conquisten la mazmorra.</p>
-    <section className="panel entry"><label htmlFor="nickname">Tu apodo</label><input id="nickname" maxLength={GAME_CONFIG.nicknameMaxLength} value={nickname} onChange={e => setNickname(e.target.value)} placeholder="Ej.: NubeArcana" onKeyDown={e => e.key === "Enter" && (initialCode ? enter(false) : enter(true))}/>
+  if (!room) return <main className="page home home-pixel"><div className="home-layout">
+    <section className="home-pitch"><div className="home-wordmark"><span className="brand-mark">M<span>&</span>P</span><span>JUEGO DE AVENTURA Y ESTUDIO</span></div>
+      <div className="dungeon-scene" aria-hidden="true"><div className="scene-wall"/><div className="scene-door"><span/><span/></div><span className="scene-torch torch-left"/><span className="scene-torch torch-right"/><span className="scene-floor"/><span className="scene-dragon"/><span className="scene-hero"/></div>
+      <p className="eyebrow">UNA CAMPAÑA COOPERATIVA</p><h1>Mazmorras<br/><span>y Parciales</span></h1><p className="intro">Reúnan al grupo, preparen sus personajes y conquisten la mazmorra pregunta a pregunta.</p>
+      <div className="home-rules"><span><b>⚔</b> EQUIPO</span><span><b>◆</b> DADOS</span><span><b>▣</b> MAZO</span></div>
+    </section>
+    <section className="panel entry"><p className="eyebrow">PREPARÁ LA PARTIDA</p><label htmlFor="nickname">Nombre de aventurero</label><input id="nickname" maxLength={GAME_CONFIG.nicknameMaxLength} value={nickname} onChange={e => setNickname(e.target.value)} placeholder="Ej.: NubeArcana" onKeyDown={e => e.key === "Enter" && (initialCode ? enter(false) : enter(true))}/>
       {initialCode ? <><p className="invite-tag">INVITACIÓN A LA SALA <strong>{initialCode}</strong></p><button className="primary full" disabled={joining} onClick={() => enter(false)}>{joining ? "Entrando…" : "Entrar a la sala"}</button></> : <><button className="primary full" disabled={joining} onClick={() => enter(true)}>{joining ? "Creando…" : "Crear una sala"}</button><div className="divider"><span>o unirse a una sala</span></div><div className="join-row"><input aria-label="Código de sala" value={code} onChange={e => setCode(e.target.value.toUpperCase().slice(0, GAME_CONFIG.roomCodeLength))} placeholder="CÓDIGO" maxLength={GAME_CONFIG.roomCodeLength} onKeyDown={e => e.key === "Enter" && enter(false)}/><button className="secondary" disabled={joining || !code} onClick={() => enter(false)}>Unirse</button></div></>}
       {error && <p role="status" className="message">{error}</p>}{(initialCode || error) && <button className="back-home" onClick={backHome}>Volver al inicio</button>}{!socket?.connected && <p className="connection">Conectando al servidor…</p>}
     </section>
-  </main>;
+    <footer className="home-footer">CREÁ UNA SALA · ELEGÍ TU ROL · JUGÁ EN EQUIPO</footer>
+  </div></main>;
 
   const me = room.players.find(p => p.id === playerId);
   const inviteUrl = `${location.origin}/sala/${room.code}`;
 
   if (room.status === "playing" && room.game) return (
     <main className="page game">
-      <header className="top battle-nav"><div className="brand">✦ <span>Dungeon de Estudio</span></div><div className="battle-nav-actions"><span className="live"><i/> Sala {room.code}</span><button className="secondary nav-toggle" onClick={() => setMenuOpen(v => !v)} aria-expanded={menuOpen}>☰ Menú</button></div>
+      <header className="top battle-nav"><div className="brand">✦ <span>Mazmorras y Parciales</span></div><div className="battle-nav-actions"><span className="live"><i/> Sala {room.code}</span><button className="secondary nav-toggle" onClick={() => setMenuOpen(v => !v)} aria-expanded={menuOpen}>☰ Menú</button></div>
         {menuOpen && <nav className="game-menu" aria-label="Menú de partida"><strong>¿Qué querés hacer?</strong><button disabled={me?.eliminated} onClick={() => { socket?.emit("game:forfeit"); setMenuOpen(false); }}>Abandonar el combate</button><small>Vas a quedar como espectador mientras el grupo sigue.</small><button className="leave-action" disabled={leavingRoom} onClick={leaveRoom}>{leavingRoom ? "Saliendo…" : "Salir de la sala"}</button></nav>}
       </header>
       <GameBoard room={room} meId={playerId} reveal={reveal} myPick={myPick} now={now} abilityNotice={abilityNotice} shopNotice={shopNotice} onPick={i => { setMyPick(i); socket?.emit("game:answer", { answer: i }); }} onAbility={a => socket?.emit("game:ability", { ability: a })} onBuy={(item, targetId) => socket?.emit("game:shop:buy", { item, targetId })} onShopContinue={() => socket?.emit("game:shop:continue")} error={error}/>
@@ -185,20 +200,23 @@ export default function App() {
 
   if (room.status === "results") return (
     <main className="page game">
-      <header className="top"><div className="brand">✦ <span>Dungeon de Estudio</span></div><span className="live"><i/> Sala {room.code}</span></header>
+      <header className="top"><div className="brand">✦ <span>Mazmorras y Parciales</span></div><span className="live"><i/> Sala {room.code}</span></header>
       <ResultsScreen room={room} meId={playerId} onAgain={() => socket?.emit("game:lobby")} canRestart={me?.isCreator ?? false} onHome={leaveRoom}/>
     </main>
   );
 
   const sinRol = room.players.filter(p => !p.role).length;
   const ready = Boolean(room.deck) && sinRol === 0;
-  return <main className="page lobby"><header className="top"><div className="brand">✦ <span>Dungeon de Estudio</span></div><div className="battle-nav-actions"><span className="live"><i/> Sala activa</span><button className="secondary nav-toggle" disabled={leavingRoom} onClick={leaveRoom}>{leavingRoom ? "Saliendo…" : "Salir de la sala"}</button></div></header>
+  return <main className="page lobby"><header className="top"><div className="brand">✦ <span>Mazmorras y Parciales</span></div><div className="battle-nav-actions"><span className="live"><i/> Sala activa</span><button className="secondary nav-toggle" disabled={leavingRoom} onClick={leaveRoom}>{leavingRoom ? "Saliendo…" : "Salir de la sala"}</button></div></header>
     <div className="lobby-grid"><section className="panel invite-card"><p className="eyebrow">LOBBY · COMPARTÍ LA INVITACIÓN</p><h1>La mazmorra<br/>se prepara</h1><div className="code-label">CÓDIGO DE SALA</div><div className="code">{room.code.split("").join(" ")}</div><button className="primary full" onClick={copyInvite}>Copiar enlace de invitación</button><p className="url">{inviteUrl}</p>{qr && <div className="qr-frame"><img src={qr} alt={`Código QR para entrar a la sala ${room.code}`}/><span>Escaneá para entrar</span></div>}<p className="small-note">Cualquiera con el enlace puede unirse mientras la sala esté abierta.</p></section>
       <section className="panel party-card"><div className="section-heading"><div><p className="eyebrow">EL GRUPO</p><h2>Jugadores <span className="count">{room.players.length}/{GAME_CONFIG.maxPlayers}</span></h2></div><span className="creator-note">{me?.isCreator ? "Sos el creador" : "Lobby de la partida"}</span></div>
-        <ul className="players">{room.players.map(p => <li key={p.id} className={!p.online ? "offline" : ""}><div className={`avatar character-sprite role-${roleSpriteId(p.role)}`} aria-label={p.role ?? "Aventurero"}>
-          <span className="hero-art-window"><img src={playerSpriteUrl(p.role)} alt=""/></span>
-        </div><div className="player-name">{p.nickname}{p.isCreator && <span className="host-badge">CREADOR</span>}<small>{p.online ? "En la sala" : "Reconectando…"}</small></div><span className={`role-pill ${p.role ? "selected" : ""}`}>{p.role ?? "Eligiendo rol"}</span></li>)}</ul>
-        <div className="role-select"><p className="eyebrow">ELEGÍ TU ROL</p><div className="roles">{GAME_CONFIG.roles.map(role => <button key={role} className={`role-card ${me?.role === role ? "active" : ""}`} onClick={() => chooseRole(role)} aria-pressed={me?.role === role}><span className={`role-icon role-${roleSpriteId(role)}`}><span className="hero-art-window"><img src={playerSpriteUrl(role)} alt=""/></span></span><strong>{role}</strong><small>{roleInfo[role]}<em>Enfriamiento: {ABILITY_COOLDOWNS[role]} preguntas</em></small></button>)}</div></div>
+        <ul className="players">{room.players.map(p => {
+          const shownRole = p.id === playerId ? pendingRole ?? p.role : p.role;
+          return <li key={p.id} className={`${!p.online ? "offline" : ""} ${p.id === playerId ? "self" : ""}`}><div className={`avatar character-sprite role-${roleSpriteId(shownRole)}`} aria-label={shownRole ?? "Aventurero"}>
+            <span className="hero-art-window"><img src={playerSpriteUrl(shownRole)} alt=""/></span>
+          </div><div className="player-name">{p.nickname}{p.id === playerId && <span className="self-badge">VOS</span>}{p.isCreator && <span className="host-badge">CREADOR</span>}<small>{p.online ? "En la sala" : "Reconectando…"}</small></div><span className={`role-pill ${shownRole ? "selected" : ""}`}>{shownRole ?? "Eligiendo rol"}</span></li>;
+        })}</ul>
+        <div className="role-select"><p className="eyebrow">ELEGÍ TU PERSONAJE</p><div className="roles">{GAME_CONFIG.roles.map(role => <button key={role} className={`role-card ${(pendingRole ?? me?.role) === role ? "active" : ""}`} onClick={() => chooseRole(role)} aria-pressed={(pendingRole ?? me?.role) === role}><span className={`role-icon role-${roleSpriteId(role)}`}><span className="hero-art-window"><img src={playerSpriteUrl(role)} alt=""/></span></span><strong>{role}</strong><small>{roleInfo[role]}<em>Enfriamiento: {ABILITY_COOLDOWNS[role]} preguntas</em></small></button>)}</div></div>
         <DeckLoader room={room} busy={deckBusy} disabled={!me?.isCreator} onFile={uploadDeck}/>
         {error && <p role="status" className="message">{error}</p>}
         {me?.isCreator
