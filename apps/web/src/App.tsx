@@ -23,7 +23,7 @@ const roleInfo: Record<Role, string> = {
   "Clérigo": "Cura al compañero más herido al acertar.", Ladrón: "Puede evitar el daño de un fallo.", Bardo: "Al acertar, da más tiempo al grupo.",
 };
 const roleIcon: Record<Role, string> = { Guerrero: "⚔", Mago: "✧", "Clérigo": "✚", Ladrón: "◈", Bardo: "♫" };
-const ENEMY_ART: Record<string, string> = { lodo: "≈", esqueleto: "☠", espectro: "◉", golem: "▣" };
+const roleSpriteId = (role: Role | null) => role?.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase() ?? "unknown";
 const TRAIT_INFO: Record<string, string> = {
   mudo: "Mudo · muestra menos opciones",
   blindado: "Blindado · ignora el daño doble",
@@ -148,7 +148,9 @@ export default function App() {
   return <main className="page lobby"><header className="top"><div className="brand">✦ <span>Dungeon de Estudio</span></div><span className="live"><i/> Sala activa</span></header>
     <div className="lobby-grid"><section className="panel invite-card"><p className="eyebrow">LOBBY · COMPARTÍ LA INVITACIÓN</p><h1>La mazmorra<br/>se prepara</h1><div className="code-label">CÓDIGO DE SALA</div><div className="code">{room.code.split("").join(" ")}</div><button className="primary full" onClick={copyInvite}>Copiar enlace de invitación</button><p className="url">{inviteUrl}</p>{qr && <div className="qr-frame"><img src={qr} alt={`Código QR para entrar a la sala ${room.code}`}/><span>Escaneá para entrar</span></div>}<p className="small-note">Cualquiera con el enlace puede unirse mientras la sala esté abierta.</p></section>
       <section className="panel party-card"><div className="section-heading"><div><p className="eyebrow">EL GRUPO</p><h2>Jugadores <span className="count">{room.players.length}/{GAME_CONFIG.maxPlayers}</span></h2></div><span className="creator-note">{me?.isCreator ? "Sos el creador" : "Lobby de la partida"}</span></div>
-        <ul className="players">{room.players.map(p => <li key={p.id} className={!p.online ? "offline" : ""}><div className="avatar">{p.nickname.slice(0, 1).toUpperCase()}</div><div className="player-name">{p.nickname}{p.isCreator && <span className="host-badge">CREADOR</span>}<small>{p.online ? "En la sala" : "Reconectando…"}</small></div><span className={`role-pill ${p.role ? "selected" : ""}`}>{p.role ?? "Eligiendo rol"}</span></li>)}</ul>
+        <ul className="players">{room.players.map(p => <li key={p.id} className={!p.online ? "offline" : ""}><div className={`avatar character-sprite role-${roleSpriteId(p.role)}`} aria-label={p.role ?? "Aventurero"}>
+          <svg viewBox="0 0 64 64" aria-hidden="true"><use href={`/sprites.svg#hero-${roleSpriteId(p.role)}`} /></svg>
+        </div><div className="player-name">{p.nickname}{p.isCreator && <span className="host-badge">CREADOR</span>}<small>{p.online ? "En la sala" : "Reconectando…"}</small></div><span className={`role-pill ${p.role ? "selected" : ""}`}>{p.role ?? "Eligiendo rol"}</span></li>)}</ul>
         <div className="role-select"><p className="eyebrow">ELEGÍ TU ROL</p><div className="roles">{GAME_CONFIG.roles.map(role => <button key={role} className={`role-card ${me?.role === role ? "active" : ""}`} onClick={() => chooseRole(role)} aria-pressed={me?.role === role}><span className="role-icon">{roleIcon[role]}</span><strong>{role}</strong><small>{roleInfo[role]}</small></button>)}</div></div>
         <DeckLoader room={room} busy={deckBusy} disabled={!me?.isCreator} onFile={uploadDeck}/>
         {error && <p role="status" className="message">{error}</p>}
@@ -189,17 +191,22 @@ function GameBoard({ room, meId, reveal, myPick, now, onPick, onAbility, error }
   const game = room.game!;
   const me = room.players.find(p => p.id === meId);
   const enemy = game.enemy;
-  const total = room.settings.questionTimeSeconds * 1000;
-  const left = Math.max(0, game.deadline - now);
   const closed = game.deadline === 0;
+  const preview = !closed && now < game.answerStartsAt;
+  const total = preview ? GAME_CONFIG.promptPreviewSeconds * 1000 : Math.max(1, game.deadline - game.answerStartsAt);
+  const left = Math.max(0, preview ? game.answerStartsAt - now : game.deadline - now);
   const shown = game.visibleOptions ?? game.current?.options.map((_, i) => i) ?? [];
   const shield = game.usedAbilities[meId]?.includes("evade") ?? false;
-  const canAct = !me?.eliminated && !closed;
+  const canAct = !me?.eliminated && !closed && !preview;
 
   return <div className="board">
     <section className="panel enemy-card">
       {enemy && <>
-        <div className="enemy-art" data-enemy={enemy.id}>{ENEMY_ART[enemy.id] ?? "◆"}</div>
+        <div className={`enemy-art ${reveal?.correct ? "struck" : reveal && !reveal.timeUp ? "attacking" : ""}`} data-enemy={enemy.id} role="img" aria-label={enemy.name}>
+          <svg className="enemy-sprite" viewBox="0 0 96 96" aria-hidden="true"><use href={`/sprites.svg#enemy-${enemy.id}`} /></svg>
+          {reveal?.correct && <span className="impact effect-hit" aria-hidden="true">✦</span>}
+          {reveal && !reveal.correct && !reveal.timeUp && <span className="impact effect-miss" aria-hidden="true">✧</span>}
+        </div>
         <div className="enemy-info"><p className="eyebrow">ENEMIGO {game.enemiesDefeated + 1}</p><h2>{enemy.name}</h2>
           {enemy.trait && <span className="trait">{TRAIT_INFO[enemy.trait] ?? enemy.trait}</span>}
           <div className="hp-bar"><div className="hp-fill enemy" style={{ width: `${(enemy.hp / enemy.maxHp) * 100}%` }}/><span>{enemy.hp} / {enemy.maxHp}</span></div>
@@ -209,10 +216,12 @@ function GameBoard({ room, meId, reveal, myPick, now, onPick, onAbility, error }
     </section>
 
     <section className="panel question-card">
-      <div className={`timer ${left < 5000 && !closed ? "urgent" : ""}`}><div className="timer-fill" style={{ width: `${closed ? 0 : Math.min(100, (left / total) * 100)}%` }}/><span>{closed ? "—" : `${Math.ceil(left / 1000)}s`}</span></div>
+      <div className={`timer ${preview ? "preview" : left < 5000 && !closed ? "urgent" : ""}`}><div className="timer-fill" style={{ width: `${closed ? 0 : Math.min(100, (left / total) * 100)}%` }}/><span>{closed ? "—" : preview ? `Opciones en ${Math.ceil(left / 1000)}s` : `${Math.ceil(left / 1000)}s`}</span></div>
       {game.current ? <>
         <p className="prompt">{game.current.prompt}</p>
-        <ul className="options">{shown.map(i => {
+        {preview
+          ? <div className="preview-hint"><span aria-hidden="true">◷</span> Leé la pregunta. Las opciones aparecen en {Math.ceil(left / 1000)} segundos.</div>
+          : <ul className="options">{shown.map(i => {
           const isCorrect = reveal?.answer === i;
           const isMyWrong = reveal && myPick === i && !reveal.correct;
           return <li key={i}>
@@ -220,12 +229,13 @@ function GameBoard({ room, meId, reveal, myPick, now, onPick, onAbility, error }
               <span className="opt-index">{String.fromCharCode(65 + i)}</span>{game.current!.options[i]}
             </button>
           </li>;
-        })}</ul>
+        })}</ul>}
       </> : <p className="prompt waiting-prompt">Preparando la siguiente pregunta…</p>}
       {reveal && <div className={`reveal ${reveal.correct ? "good" : reveal.timeUp ? "timeup" : "bad"}`}>
         <strong>{reveal.correct ? "¡Dominada!" : reveal.timeUp ? "Se acabó el tiempo" : "Fallaste"}</strong>
         {reveal.answer !== null && <span>Correcta: {game.current?.options[reveal.answer]}</span>}
         {reveal.correct && reveal.damage > 0 && <span>−{reveal.damage} de vida al enemigo</span>}
+        {reveal.timeUp && <span>Se agotó el tiempo: cada aventurero perdió 1 vida.</span>}
         {reveal.healedPlayer && <span>{reveal.healedPlayer} recuperó {reveal.healedAmount} de vida</span>}
         {!reveal.correct && !reveal.timeUp && reveal.damage === 0 && <span>Tu escudo absorbió el golpe</span>}
         {reveal.explanation && <p>{reveal.explanation}</p>}
@@ -236,7 +246,11 @@ function GameBoard({ room, meId, reveal, myPick, now, onPick, onAbility, error }
     <section className="panel crew-card">
       <p className="eyebrow">EL GRUPO</p>
       <ul className="crew">{room.players.map(p => <li key={p.id} className={`${!p.online ? "offline" : ""} ${p.eliminated ? "down" : ""}`}>
-        <div className="avatar">{p.nickname.slice(0, 1).toUpperCase()}</div>
+        <div className={`avatar character-sprite role-${roleSpriteId(p.role)}`} aria-label={p.role ?? "Aventurero"}>
+          <svg viewBox="0 0 64 64" aria-hidden="true"><use href={`/sprites.svg#hero-${roleSpriteId(p.role)}`} /></svg>
+          {reveal?.healedPlayer === p.nickname && <i className="effect-heal" aria-hidden="true">＋</i>}
+          {reveal && !reveal.correct && <i className="effect-damage" aria-hidden="true">✦</i>}
+        </div>
         <div className="crew-name"><strong>{p.nickname}</strong><small>{p.role ?? "sin rol"}</small></div>
         <div className="pips">{Array.from({ length: p.maxHp }, (_, i) => <i key={i} className={i < p.hp ? "on" : ""}/>)}</div>
         {p.eliminated && <span className="down-tag">CAÍDO</span>}

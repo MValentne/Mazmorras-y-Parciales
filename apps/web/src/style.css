@@ -195,14 +195,148 @@ button:disabled { opacity: .55; cursor: wait; }
 .stats span { color: #9b9284; font-size: 10px; }
 .result-actions { display: grid; gap: 9px; max-width: 300px; margin: auto; }
 
+/* Sprites de combate y efectos de interacción */
+.game { position: relative; isolation: isolate; }
+.game::before { content: ""; position: fixed; z-index: -1; inset: 0; pointer-events: none; opacity: .14; background: repeating-linear-gradient(90deg, transparent 0 70px, #a9814920 71px 73px), linear-gradient(180deg, transparent 58%, #090806 100%); }
+.enemy-art { position: relative; display: grid; place-items: center; width: 126px; height: 126px; margin: 0 auto 12px; border: 1px solid #59462b; border-radius: 16px; overflow: hidden; background: radial-gradient(ellipse, #6c512633, #11100d 70%); }
+.enemy-art::after { content: ""; position: absolute; left: 17%; right: 17%; bottom: 13px; height: 12px; border-radius: 50%; background: #0009; filter: blur(5px); }
+.enemy-sprite { width: 90px; height: 90px; image-rendering: pixelated; filter: drop-shadow(0 4px 0 #0008); animation: sprite-float 2.6s ease-in-out infinite; }
+.enemy-art[data-enemy="lodo"] { background: radial-gradient(ellipse, #58743966, #11100d 70%); }
+.enemy-art[data-enemy="esqueleto"] { background: radial-gradient(ellipse, #c2b58c33, #11100d 70%); }
+.enemy-art[data-enemy="espectro"] { background: radial-gradient(ellipse, #7187d466, #11100d 70%); }
+.enemy-art[data-enemy="golem"] { background: radial-gradient(ellipse, #9f805444, #11100d 70%); }
+.enemy-art[data-enemy="dragon"] { background: radial-gradient(ellipse, #b84d385c, #11100d 70%); }
+.enemy-art[data-enemy="spider"] { background: radial-gradient(ellipse, #a7477555, #11100d 70%); }
+.enemy-art[data-enemy="mimic"] { background: radial-gradient(ellipse, #ba8e3d55, #11100d 70%); }
+.enemy-art.struck .enemy-sprite { animation: sprite-hit .48s ease-out; }
+.enemy-art.attacking .enemy-sprite { animation: sprite-attack .42s ease-in-out; }
+.impact { position: absolute; z-index: 2; font-size: 37px; line-height: 1; pointer-events: none; }
+.effect-hit { color: #ffe293; text-shadow: 0 0 14px #ffb531; animation: impact-burst .55s ease-out both; }
+.effect-miss { color: #9cc8e3; text-shadow: 0 0 12px #62b8e7; animation: impact-burst .55s ease-out both; }
+.character-sprite { position: relative; flex: 0 0 42px; width: 42px; height: 42px; border-radius: 9px; overflow: visible; background: #211e18; }
+.character-sprite svg { width: 100%; height: 100%; image-rendering: pixelated; filter: drop-shadow(0 2px 1px #0008); animation: hero-idle 2.8s ease-in-out infinite; }
+.character-sprite > span { position: absolute; right: -3px; bottom: -4px; display: grid; place-items: center; width: 17px; height: 17px; border: 1px solid #dbc27e; border-radius: 50%; color: #fff2cf; background: #302719; font-size: 9px; font-weight: 800; box-shadow: 0 1px 4px #000; }
+.character-sprite .effect-heal, .character-sprite .effect-damage { position: absolute; top: -12px; right: 1px; z-index: 2; font-style: normal; font-size: 23px; font-weight: 900; animation: status-rise .9s ease-out both; }
+.effect-heal { color: #a8e58f; text-shadow: 0 0 9px #60d859; }
+.effect-damage { color: #ef8a78; text-shadow: 0 0 9px #ec4131; }
+.role-guerrero { box-shadow: 0 0 15px #c2514a30; }
+.role-mago { box-shadow: 0 0 15px #8775dc40; }
+.role-clerico { box-shadow: 0 0 15px #75bd8840; }
+.role-ladron { box-shadow: 0 0 15px #64b6d240; }
+.role-bardo { box-shadow: 0 0 15px #dfb65b40; }
+.option.correct { animation: answer-success .55s ease-out; }
+.option.wrong { animation: answer-fail .38s ease-in-out; }
+.ability:not(:disabled):active { transform: scale(.96); }
+.reveal { animation: reveal-in .28s ease-out both; }
+.results.won .result-sigil { animation: victory-glow 1.8s ease-in-out infinite; }
+@keyframes sprite-float { 0%,100% { transform: translateY(1px); } 50% { transform: translateY(-5px); } }
+@keyframes hero-idle { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
+@keyframes sprite-hit { 0% { transform: translateX(0) scale(1); filter: brightness(1); } 35% { transform: translateX(-9px) scale(.91); filter: brightness(2) sepia(.5); } 100% { transform: translateX(0) scale(1); } }
+@keyframes sprite-attack { 0% { transform: translateX(0); } 45% { transform: translateX(-8px) scale(1.06); } 100% { transform: translateX(0); } }
+@keyframes impact-burst { 0% { transform: scale(.1) rotate(-25deg); opacity: 0; } 45% { transform: scale(1.25) rotate(10deg); opacity: 1; } 100% { transform: scale(.8); opacity: 0; } }
+@keyframes answer-success { 40% { transform: scale(1.02); box-shadow: 0 0 22px #8fca6255; } }
+@keyframes answer-fail { 25% { transform: translateX(-5px); } 70% { transform: translateX(5px); } }
+@keyframes reveal-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes status-rise { 0% { transform: translateY(8px) scale(.6); opacity: 0; } 30% { opacity: 1; } 100% { transform: translateY(-23px) scale(1.1); opacity: 0; } }
+@keyframes victory-glow { 50% { transform: scale(1.1) rotate(8deg); filter: drop-shadow(0 0 15px #ffd36d); } }
+@media (max-width: 860px) { .enemy-art { flex: 0 0 76px; width: 76px; height: 76px; margin: 0; border-radius: 12px; } .enemy-sprite { width: 62px; height: 62px; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; } }
+
+/* La partida se presenta como una arena con HUD, personajes y opciones de acción. */
+.game { width: min(1200px, 100%); padding-top: 18px; background: radial-gradient(ellipse at 50% 38%, #453522 0, #241c14 50%, #17130f 83%); }
+.game > .top { min-height: 54px; margin: 0 0 15px; padding: 0 4px 12px; border-bottom: 1px solid #9a76384a; }
+.game .brand { display: flex; align-items: center; gap: 9px; font-size: 17px; text-shadow: 0 2px #000; }
+.game .brand:first-letter { font-size: 24px; }
+.game .live { padding: 7px 12px; border: 1px solid #75603b; border-radius: 20px; background: #17130fc9; color: #e2cf9e; box-shadow: 0 3px 8px #0007; }
+.board { max-width: 1040px; margin: 0 auto; grid-template-columns: 1fr; gap: 15px; }
+.enemy-card { grid-column: 1; grid-row: 1; position: relative; display: grid; grid-template-columns: 1fr minmax(230px, 35%); align-items: start; min-height: 335px; padding: 20px 26px; overflow: hidden; text-align: left; border: 2px solid #705331; border-radius: 17px; background: linear-gradient(180deg, #222b36 0%, #303039 45%, #514033 46%, #33261b 72%, #17130f 100%); box-shadow: 0 8px 0 #100d0a, 0 16px 34px #0009, inset 0 0 50px #161116; }
+.enemy-card::before { content: ""; position: absolute; inset: 0; pointer-events: none; opacity: .45; background: radial-gradient(ellipse at 50% 35%, #e2b86b37, transparent 48%), repeating-linear-gradient(165deg, transparent 0 33px, #d8bc8720 34px 36px), linear-gradient(90deg, #17120d88, transparent 30% 70%, #17120d88); }
+.enemy-card::after { content: ""; position: absolute; inset: auto 0 0; height: 50px; opacity: .65; background: repeating-linear-gradient(90deg, #18120c 0 54px, #503a22 55px 60px, #251c13 61px 110px); border-top: 4px solid #685034; }
+.enemy-art { z-index: 1; grid-column: 1 / -1; grid-row: 1; justify-self: center; align-self: start; width: 230px; height: 230px; margin: 6px 0 0; border: 0; border-radius: 50%; overflow: visible; background: radial-gradient(ellipse, #d2a45232 0, #84663d24 42%, transparent 72%); filter: drop-shadow(0 8px 0 #0008); }
+.enemy-art::after { left: 17%; right: 17%; bottom: 25px; height: 18px; }
+.enemy-sprite { z-index: 1; width: 190px; height: 190px; image-rendering: pixelated; filter: drop-shadow(0 9px 0 #0008) drop-shadow(0 0 14px #ebc77c55); }
+.enemy-info { z-index: 2; grid-column: 2; grid-row: 1; align-self: start; width: 100%; padding: 16px; border: 1px solid #c49c566e; border-radius: 11px; background: #16120fd9; box-shadow: 0 5px 15px #0008; }
+.enemy-info .eyebrow { color: #d1ad65; }
+.enemy-info h2 { font-size: 22px; text-shadow: 0 2px #000; }
+.enemy-info .trait { margin: 6px 0 12px; }
+.enemy-info .hp-bar { height: 25px; border: 2px solid #21170f; border-radius: 5px; box-shadow: 0 0 0 1px #a67b3d; }
+.hp-fill.enemy { background: repeating-linear-gradient(135deg, #af3f35 0 8px, #c55242 8px 16px); box-shadow: inset 0 2px #ffb19555; }
+.deck-progress { position: absolute; z-index: 3; top: 18px; left: 23px; width: 87px; margin: 0; padding: 8px 6px; border: 1px solid #c19a5c; border-radius: 10px; background: #17130fd9; text-align: center; box-shadow: 0 4px 12px #0008; }
+.mastered { font-size: 25px; text-shadow: 0 2px #503311; }
+.deck-progress small { display: block; font-size: 9px; }
+.crew-card { grid-column: 1; grid-row: 2; padding: 13px 16px 15px; border: 1px solid #705331; border-radius: 13px; background: linear-gradient(180deg, #302519, #1c1712); box-shadow: 0 5px 0 #100d0a, 0 12px 25px #0007, inset 0 1px #dfbb7133; }
+.crew-card > .eyebrow { margin: 0 0 10px; font-size: 11px; color: #e6c274; }
+.crew { grid-template-columns: repeat(auto-fit, minmax(185px, 1fr)); gap: 8px; }
+.crew li { position: relative; min-height: 75px; padding: 8px 10px; gap: 10px; border: 1px solid #57462e; border-radius: 9px; background: linear-gradient(135deg, #31291e, #1e1a15); box-shadow: inset 0 1px #fff1, 0 3px 7px #0005; }
+.crew li:not(.down) { animation: card-arrive .4s ease-out both; }
+.crew li.down { filter: grayscale(.75); }
+.crew .character-sprite { flex-basis: 58px; width: 58px; height: 58px; border: 1px solid #957444; border-radius: 10px; background: radial-gradient(circle at 50% 40%, #84704d, #2a2117); }
+.crew .character-sprite > span { width: 19px; height: 19px; font-size: 10px; }
+.crew-name strong { color: #f0dfbb; font: 700 13px Georgia, serif; }
+.crew-name small { font-size: 10px; color: #c0a878; }
+.pips { gap: 4px; }
+.pips i { width: 10px; height: 10px; }
+.down-tag { position: absolute; right: 8px; top: 5px; background: #271512; }
+.abilities { gap: 8px; margin-top: 11px; padding-top: 10px; border-color: #705331; }
+.ability { border-radius: 8px; box-shadow: 0 3px 0 #775421, 0 5px 10px #0006, inset 0 1px #fff7; text-shadow: 0 1px #fff5; }
+.ability-note { padding: 8px 11px; border: 1px solid #635034; border-radius: 8px; background: #17130f; color: #d6c29a; }
+.question-card { grid-column: 1; grid-row: 3; position: relative; padding: 19px 22px 22px; border: 2px solid #80633a; border-radius: 14px; background: linear-gradient(135deg, #e1c990, #c6ab72); color: #332819; box-shadow: 0 6px 0 #644a27, 0 12px 22px #0008, inset 0 0 0 4px #e8d7ac; }
+.timer { height: 13px; margin: 0 0 25px; border: 2px solid #473723; border-radius: 8px; background: #827354; box-shadow: inset 0 2px 4px #0008; }
+.timer-fill { border-radius: 6px; background: repeating-linear-gradient(135deg, #8c3e2c 0 8px, #b65c3a 8px 16px); box-shadow: inset 0 2px #fff5; }
+.timer span { top: -4px; right: 8px; padding: 2px 7px; border: 1px solid #45351f; border-radius: 7px; background: #241c13; color: #fff1cc; font-weight: 800; }
+.timer.urgent { animation: timer-pulse .65s ease-in-out infinite alternate; }
+.timer.urgent span { color: #ffd27a; }
+.timer.preview .timer-fill { background: repeating-linear-gradient(135deg, #42657b 0 8px, #648ca0 8px 16px); }
+.timer.preview span { right: 50%; transform: translateX(50%); color: #d8e9e6; }
+.preview-hint { display: flex; align-items: center; justify-content: center; gap: 9px; min-height: 54px; padding: 10px; border: 1px dashed #907143; border-radius: 10px; color: #57472f; background: #d2b98280; font: 600 13px/1.4 Georgia, serif; text-align: center; }
+.preview-hint span { color: #795a2f; font-size: 22px; animation: sprite-float 1.3s ease-in-out infinite; }
+.prompt { margin: 0 0 15px; color: #392a1b; font: 700 23px/1.35 Georgia, serif; text-shadow: 0 1px #fff8; }
+.options { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.option { min-height: 59px; padding: 10px 12px; border: 2px solid #7f633b; border-radius: 10px; background: linear-gradient(#f0dfb7, #d6bd87); color: #3b2b1a; box-shadow: 0 4px 0 #80623a, 0 6px 10px #6b4c2530, inset 0 1px #fff; font-weight: 700; }
+.option:hover:not(:disabled) { transform: translateY(-2px); border-color: #543818; background: linear-gradient(#fff0c7, #e5ca8b); box-shadow: 0 6px 0 #80623a, 0 8px 14px #6b4c2540; }
+.option:disabled { opacity: .88; }
+.opt-index { flex-basis: 30px; height: 30px; border: 2px solid #72552c; border-radius: 8px; background: #9f7b43; color: #fff2d4; box-shadow: inset 0 1px #fff5; }
+.option.correct { border-color: #436c30; background: linear-gradient(#d8efb9, #aed186); color: #25371d; box-shadow: 0 4px 0 #42612e, 0 0 18px #b5ef7e; }
+.option.correct .opt-index { border-color: #497338; background: #6d994d; }
+.option.wrong { border-color: #81362e; background: linear-gradient(#efc1a7, #d9937b); color: #49231f; box-shadow: 0 4px 0 #7a322a; }
+.reveal { border-color: #72562d; background: #f0dfb7; color: #3e2e1c; box-shadow: inset 0 0 0 2px #fff6; }
+.reveal p { color: #57462e; }
+.reveal.good { border-color: #5e793e; background: #dfedc6; color: #314323; }
+.reveal.bad { border-color: #8c4335; background: #f0d0b5; color: #552921; }
+.reveal.timeup { border-color: #80633a; background: #f1dfb6; color: #57421f; }
+@keyframes card-arrive { from { opacity: .3; transform: translateY(6px) scale(.97); } to { opacity: 1; transform: none; } }
+@keyframes timer-pulse { to { box-shadow: 0 0 14px #ed794c, inset 0 2px 4px #0008; } }
 @media (max-width: 860px) {
-  .board { grid-template-columns: 1fr; }
-  .question-card { grid-column: 1; grid-row: 1; }
-  .enemy-card { grid-column: 1; grid-row: 2; display: flex; align-items: center; gap: 15px; text-align: left; }
-  .enemy-art { margin: 0; font-size: 30px; }
-  .enemy-info { flex: 1; }
-  .deck-progress { margin: 0; border: 0; border-left: 1px solid #40392d; padding: 0 0 0 15px; text-align: center; }
-  .mastered { font-size: 24px; }
-  .prompt { font-size: 18px; }
-  .crew { grid-template-columns: 1fr; }
+  .game { padding: 13px 11px 28px; }
+  .board { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .enemy-card { grid-column: 1; grid-row: 1; min-height: 290px; grid-template-columns: 1fr 42%; padding: 14px; }
+  .enemy-art { grid-column: 1 / -1; grid-row: 1; justify-self: center; align-self: center; width: 190px; height: 190px; margin: 0; }
+  .enemy-sprite { width: 155px; height: 155px; }
+  .enemy-info { grid-column: 2; grid-row: 1; align-self: end; padding: 10px; }
+  .deck-progress { top: 12px; left: 12px; }
+  .crew-card { grid-row: 2; padding: 12px; }
+  .crew { grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); }
+  .question-card { grid-row: 3; padding: 17px; }
+  .question-card .prompt { font-size: 20px; }
+}
+@media (max-width: 520px) {
+  .enemy-card { min-height: 255px; grid-template-columns: 1fr; }
+  .enemy-art { width: 170px; height: 170px; justify-self: center; align-self: start; margin-top: 14px; }
+  .enemy-sprite { width: 140px; height: 140px; }
+  .enemy-info { grid-column: 1; grid-row: 1; align-self: end; justify-self: center; max-width: 310px; padding: 8px 10px; text-align: center; }
+  .enemy-info .eyebrow { margin-bottom: 4px; }
+  .enemy-info h2 { font-size: 17px; }
+  .enemy-info .trait { margin: 2px 0 7px; }
+  .deck-progress { width: 66px; padding: 5px; }
+  .deck-progress .mastered { font-size: 20px; }
+  .deck-progress small { font-size: 8px; }
+  .crew { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .crew li { min-width: 0; padding: 7px; gap: 6px; }
+  .crew .character-sprite { flex-basis: 44px; width: 44px; height: 44px; }
+  .crew-name strong { font-size: 11px; overflow-wrap: anywhere; }
+  .crew .pips { display: none; }
+  .options { grid-template-columns: 1fr; gap: 8px; }
+  .option { min-height: 49px; }
+  .game .brand { font-size: 14px; }
+  .game .live { font-size: 9px; padding: 6px 8px; }
 }

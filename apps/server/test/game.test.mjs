@@ -46,7 +46,6 @@ function makeRoom(roles = ["Guerrero", "Mago"], cards = deck()) {
     remaining: [],
     drawn: null,
     discardedFor: null,
-    idleTimeouts: 0,
     timers: {},
   };
   openRooms.push(room);
@@ -75,6 +74,7 @@ const openRooms = [];
 
 before(() => {
   GAME_CONFIG.answerRevealMs = 5;
+  GAME_CONFIG.promptPreviewSeconds = 0;
   GAME_CONFIG.questionTimeSeconds = 0.08;
 });
 
@@ -206,6 +206,7 @@ describe("fin de ronda y de partida", () => {
     assert.equal(room.game.mastered, 0);
     assert.equal(room.status, "playing", "la carta volvió al mazo, así que la partida sigue");
     assert.equal(liveCards(room), 1, "la carta sigue viva en el mazo");
+    assert.equal(room.players.every((player) => player.hp === GAME_CONFIG.playerMaxHp - 1), true, "el tiempo agotado daña a todo el grupo");
   });
 
   it("cuando muere un enemigo a mitad del mazo aparece el siguiente", async () => {
@@ -264,10 +265,10 @@ describe("fin de ronda y de partida", () => {
     assert.equal(room.game.outcome, "abandoned");
   });
 
-  it("si nadie responde nunca, la partida no queda colgada para siempre", async () => {
+  it("si nadie responde, cada timeout daña al grupo hasta perder", async () => {
     const { room, hooks } = started();
     await sleep(1000);
     assert.equal(room.status, "results");
-    assert.equal(room.game.outcome, "abandoned");
+    assert.equal(room.game.outcome, "lost");
   });
 });

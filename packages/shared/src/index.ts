@@ -6,7 +6,8 @@ export const GAME_CONFIG = {
   roomInactiveMs: 30 * 60 * 1000,
   roles: ["Guerrero", "Mago", "Clérigo", "Ladrón", "Bardo"] as const,
   playerMaxHp: 3,
-  questionTimeSeconds: 20,
+  promptPreviewSeconds: 10,
+  questionTimeSeconds: 25,
   extraTimeSeconds: 5,
   answerRevealMs: 4500,
   minOptions: 2,
@@ -23,6 +24,9 @@ export const ENEMIES = [
   { id: "esqueleto", name: "Esqueleto Olvidado", hp: 4, trait: null },
   { id: "espectro", name: "Espectro de la Distracción", hp: 5, trait: "mudo" },
   { id: "golem", name: "Golem de Apuntes", hp: 7, trait: "blindado" },
+  { id: "dragon", name: "Dragón de Parciales", hp: 6, trait: null },
+  { id: "spider", name: "Araña de Tinta", hp: 4, trait: null },
+  { id: "mimic", name: "Cofre Tramposo", hp: 5, trait: null },
 ] as const satisfies readonly { id: string; name: string; hp: number; trait: string | null }[];
 
 export type Role = (typeof GAME_CONFIG.roles)[number];
@@ -81,6 +85,7 @@ export interface GameState {
   enemiesDefeated: number;
   enemy: Enemy | null;
   current: PublicCard | null;
+  answerStartsAt: number;
   deadline: number;
   timeBonusMs: number;
   visibleOptions: number[] | null;

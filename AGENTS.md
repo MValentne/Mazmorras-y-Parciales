@@ -12,7 +12,7 @@ el detalle de despliegue; este archivo tiene lo que no se deduce del README.
 | `npm run build` | shared → server → web, en ese orden | El orden importa, ver abajo |
 | `npm start` | Un solo proceso en `:3001` que sirve API + frontend | Necesita `apps/web/dist` |
 | `npm test` | 39 unitarios (~9 s). **Compila shared y server primero** | Corre contra `dist/`, no contra el fuente |
-| `npm run test:e2e` | 20 chequeos por WebSocket contra el server real (~20 s) | **No compila nada.** Sin `dist/` stale o falla |
+| `npm run test:e2e` | 20 chequeos por WebSocket contra el server real (~70 s) | **No compila nada.** Sin `dist/` stale o falla |
 
 Un solo test: `node --test --test-name-pattern="timeout" apps/server/test/game.test.mjs`.
 
@@ -70,7 +70,7 @@ Un solo test: `node --test --test-name-pattern="timeout" apps/server/test/game.t
   completas y lo baja. Usa el puerto `3111` para no chocar con el de desarrollo.
   Los mazos están armados con la respuesta siempre en el mismo índice, porque el
   cliente no puede saber cuál es la correcta: así la prueba es determinista.
-  Demora ~20 s por la pausa de reveal de 4,5 s entre cartas; no está colgada.
+  Demora ~70 s por la espera de pregunta y la pausa de reveal de 4,5 s entre cartas; no está colgada.
   Los mazos de la partida 1 tienen la correcta en el índice 1 y los de la 2 en el 0:
   si los mezclás, la prueba de derrota deja de eliminar a nadie.
 

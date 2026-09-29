@@ -103,6 +103,8 @@ try {
     assert.equal(beto().hp, 3);
   });
 
+  await until("aparecen las opciones", () => Date.now() >= a.room.game.answerStartsAt);
+
   a.socket.emit("game:answer", { answer: 7 });
   await wait(120);
   check("una respuesta fuera de rango se ignora", () => assert.equal(ana().hp, 3));
@@ -155,7 +157,7 @@ try {
 
   // El mazo tiene la correcta en el índice 0, así que Ana acierta siempre. Entre
   // carta y carta hay una pausa de reveal de varios segundos, de ahí el margen.
-  const playUntil = Date.now() + 60000;
+  const playUntil = Date.now() + 90000;
   while (a.room.status === "playing" && Date.now() < playUntil) {
     if (a.room.game.deadline > Date.now()) a.socket.emit("game:answer", { answer: 0 });
     await wait(150);

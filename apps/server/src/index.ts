@@ -110,7 +110,6 @@ io.on("connection", (socket: Socket<ClientEvents, ServerEvents>) => {
       remaining: [],
       drawn: null,
       discardedFor: null,
-      idleTimeouts: 0,
       timers: {},
     };
     rooms.set(code, room);

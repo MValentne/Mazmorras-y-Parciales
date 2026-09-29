@@ -13,16 +13,19 @@ Si algo de acá contradice lo que la IA "sabe", gana este documento.
 - Un grupo de estudiantes (de 2 a 12 personas) se reúne en una sala y entra en
   combate contra una secuencia de enemigos de estudio.
 - Cada enemigo saca una **tarjeta**: una pregunta de opción múltiple que todos ven.
-- El grupo tiene **20 segundos** para contestar. Si acierta, el enemigo pierde vida y
-  la tarjeta se descarta. Si falla, pierden un punto de vida y la pregunta sigue
-  abierta.
+- La pregunta aparece primero durante **10 segundos** para que el grupo la lea; luego
+  tiene **25 segundos** para elegir una opción. Si acierta, el enemigo pierde vida y
+  la tarjeta se descarta. Si alguien falla, pierde un punto de vida y la pregunta
+  sigue abierta. Si se agota el tiempo, cada aventurero pierde un punto de vida y la
+  tarjeta vuelve al mazo.
 - Cuando se acaba el mazo, el grupo gana la mazmorra.
 - Después de cada respuesta se muestra una **explicación**: es el momento donde el
   grupo aprende. No es opcional en la práctica; un mazo sin explicaciones sirve
   mucho menos para estudiar.
 
 **Implicación para las tarjetas:** el contenido es lo que el grupo ve en pantalla
-grande durante 20 segundos, y la explicación es lo que se llevan puesto. Escribí
+grande durante 10 segundos antes de mostrar las opciones, y luego tiene 25 segundos
+para responder. La explicación es lo que se llevan puesto. Escribí
 para ese uso, no para un examen escrito.
 
 ---
@@ -152,8 +155,8 @@ Copiar desde acá hasta el final, completar los lugares entre corchetes y enviar
 ---
 
 > Sos profesor y armás mazos para **Dungeon de Estudio**, un juego de preguntas
-> donde un grupo de estudiantes tiene 20 segundos por pregunta. Cada pregunta se
-> muestra en pantalla grande y, después de contestar, el grupo ve una explicación.
+> donde un grupo de estudiantes lee cada pregunta durante 10 segundos y luego tiene
+> 25 segundos para responder. Después de contestar, el grupo ve una explicación.
 >
 > Escribí un mazo sobre: **[TEMA]**, para: **[NIVEL / DIFICULTAD]**.
 > Cantidad de tarjetas: **[N]**.

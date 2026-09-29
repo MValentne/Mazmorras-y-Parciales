@@ -20,7 +20,6 @@ export type GameRoom = RoomState & {
   remaining: Card[];
   drawn: Card | null;
   discardedFor: string | null;
-  idleTimeouts: number;
   timers: Timers;
 };
 
@@ -69,7 +68,7 @@ export function validateDeck(raw: unknown): { cards: Card[]; error: string | nul
 }
 
 export function publicView(room: GameRoom): RoomState {
-  const { sockets: _s, cards: _c, remaining: _r, drawn: _d, discardedFor: _dd, idleTimeouts: _it, timers: _t, ...state } = room;
+  const { sockets: _s, cards: _c, remaining: _r, drawn: _d, discardedFor: _dd, timers: _t, ...state } = room;
   return {
     ...state,
     players: state.players.map((p) => ({ ...p })),
@@ -94,12 +93,6 @@ export function clearTimers(room: GameRoom) {
 const alive = (room: GameRoom) => room.players.filter((p) => !p.eliminated);
 
 /**
- * Cuántas veces seguidas se deja morir el tiempo sin que nadie acierte. Sin este
- * tope la carta vuelve al mazo, se reparte otra vez y el ciclo no termina nunca.
- */
-const MAX_IDLE_TIMEOUTS = 5;
-
-/**
  * Cierra la partida si corresponde. Son dos finales distintos: "abandoned" es que
  * se fueron todos (y la sala es memoria, no podemos esperar un reconnect eterno),
  * "lost" es que el equipo fue derrotado.
@@ -117,6 +110,7 @@ function closeQuestion(room: GameRoom) {
   const g = room.game;
   if (g) {
     g.deadline = 0;
+    g.answerStartsAt = 0;
     g.visibleOptions = null;
   }
 }
@@ -147,10 +141,12 @@ function armDeadline(room: GameRoom, hooks: EngineHooks) {
   const g = room.game;
   if (!g) return;
   clearTimers(room);
-  const ms = room.settings.questionTimeSeconds * 1000 + g.timeBonusMs;
+  const previewMs = GAME_CONFIG.promptPreviewSeconds * 1000;
+  const answerMs = room.settings.questionTimeSeconds * 1000 + g.timeBonusMs;
   g.timeBonusMs = 0;
-  g.deadline = Date.now() + ms;
-  room.timers.deadline = setTimeout(() => onTimeout(room, hooks), ms);
+  g.answerStartsAt = Date.now() + previewMs;
+  g.deadline = g.answerStartsAt + answerMs;
+  room.timers.deadline = setTimeout(() => onTimeout(room, hooks), previewMs + answerMs);
 }
 
 function spawnEnemy(room: GameRoom) {
@@ -233,10 +229,9 @@ function onTimeout(room: GameRoom, hooks: EngineHooks) {
   const card = room.drawn;
   if (!g || room.status !== "playing" || !card) return;
   if (settle(room, hooks)) return;
-  room.idleTimeouts += 1;
-  if (room.idleTimeouts >= MAX_IDLE_TIMEOUTS) {
-    finish(room, hooks, "abandoned");
-    return;
+  for (const player of alive(room)) {
+    player.hp = Math.max(0, player.hp - 1);
+    if (!player.hp) player.eliminated = true;
   }
 
   room.remaining.push(card);
@@ -244,7 +239,7 @@ function onTimeout(room: GameRoom, hooks: EngineHooks) {
     correct: false,
     answer: card.answer,
     ...(card.explanation ? { explanation: card.explanation } : {}),
-    damage: 0,
+    damage: 1,
     healedPlayer: null,
     healedAmount: 0,
     timeUp: true,
@@ -252,6 +247,7 @@ function onTimeout(room: GameRoom, hooks: EngineHooks) {
   };
   closeQuestion(room);
   hooks.onState(room);
+  if (settle(room, hooks)) return;
   hooks.onReveal(room, reveal);
   scheduleAdvance(room, hooks);
 }
@@ -262,7 +258,6 @@ export function startGame(room: GameRoom, hooks: EngineHooks) {  if (room.status
   room.remaining = shuffle(room.cards.slice(0, limit));
   room.drawn = null;
   room.discardedFor = null;
-  room.idleTimeouts = 0;
   for (const p of room.players) {
     p.hp = GAME_CONFIG.playerMaxHp;
     p.maxHp = GAME_CONFIG.playerMaxHp;
@@ -275,6 +270,7 @@ export function startGame(room: GameRoom, hooks: EngineHooks) {  if (room.status
     enemiesDefeated: 0,
     enemy: null,
     current: null,
+    answerStartsAt: 0,
     deadline: 0,
     timeBonusMs: 0,
     visibleOptions: null,
@@ -293,6 +289,10 @@ export function handleAnswer(room: GameRoom, hooks: EngineHooks, player: Player,
   if (!g || room.status !== "playing" || !card) return;
   if (player.eliminated) {
     hooks.onError(room, player.id, "ELIMINATED", "Caíste: podés mirar, pero ya no respondés.");
+    return;
+  }
+  if (Date.now() < g.answerStartsAt) {
+    hooks.onError(room, player.id, "QUESTION_PREVIEW", "Esperá a que aparezcan las opciones para responder.");
     return;
   }
   if (Date.now() > g.deadline) return;
@@ -327,7 +327,6 @@ export function handleAnswer(room: GameRoom, hooks: EngineHooks, player: Player,
   const heal = player.role === "Clérigo" ? healTeam(room) : { nickname: null, amount: 0 };
   if (player.role === "Bardo") g.timeBonusMs += GAME_CONFIG.extraTimeSeconds * 1000;
   g.mastered += 1;
-  room.idleTimeouts = 0;
 
   const reveal: Reveal = {
     correct: true,
@@ -348,6 +347,10 @@ export function handleAnswer(room: GameRoom, hooks: EngineHooks, player: Player,
 export function useAbility(room: GameRoom, hooks: EngineHooks, player: Player, ability: Ability) {
   const g = room.game;
   if (!g || room.status !== "playing") return;
+  if (Date.now() < g.answerStartsAt) {
+    hooks.onError(room, player.id, "QUESTION_PREVIEW", "Esperá a que aparezcan las opciones para usar habilidades.");
+    return;
+  }
   if (player.eliminated) {
     hooks.onError(room, player.id, "ELIMINATED", "Caíste: ya no podés usar habilidades.");
     return;
