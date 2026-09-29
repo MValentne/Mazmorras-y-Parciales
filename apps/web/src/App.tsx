@@ -40,6 +40,11 @@ const effectLabel: Partial<Record<Ability, string>> = {
   heal: "SANACIÓN USADA", track: "RASTREO ACTIVO", extend: "TIEMPO EXTRA", potion: "TÓNICO USADO",
 };
 const roleSpriteId = (role: Role | null) => role?.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase() ?? "unknown";
+const roleSpriteAsset: Record<Role, string> = {
+  Guerrero: "warrior", Mago: "mage", "Clérigo": "cleric", Ladrón: "thief",
+  Bardo: "bard", "Paladín": "paladin", Explorador: "explorer", Alquimista: "alchemist",
+};
+const playerSpriteUrl = (role: Role | null) => `/sprites/characters/${role ? roleSpriteAsset[role] : "unknown"}.png`;
 const TRAIT_INFO: Record<string, string> = {
   mudo: "Mudo · muestra menos opciones",
   blindado: "Blindado · ignora el daño doble",
@@ -191,9 +196,9 @@ export default function App() {
     <div className="lobby-grid"><section className="panel invite-card"><p className="eyebrow">LOBBY · COMPARTÍ LA INVITACIÓN</p><h1>La mazmorra<br/>se prepara</h1><div className="code-label">CÓDIGO DE SALA</div><div className="code">{room.code.split("").join(" ")}</div><button className="primary full" onClick={copyInvite}>Copiar enlace de invitación</button><p className="url">{inviteUrl}</p>{qr && <div className="qr-frame"><img src={qr} alt={`Código QR para entrar a la sala ${room.code}`}/><span>Escaneá para entrar</span></div>}<p className="small-note">Cualquiera con el enlace puede unirse mientras la sala esté abierta.</p></section>
       <section className="panel party-card"><div className="section-heading"><div><p className="eyebrow">EL GRUPO</p><h2>Jugadores <span className="count">{room.players.length}/{GAME_CONFIG.maxPlayers}</span></h2></div><span className="creator-note">{me?.isCreator ? "Sos el creador" : "Lobby de la partida"}</span></div>
         <ul className="players">{room.players.map(p => <li key={p.id} className={!p.online ? "offline" : ""}><div className={`avatar character-sprite role-${roleSpriteId(p.role)}`} aria-label={p.role ?? "Aventurero"}>
-          <svg viewBox="0 0 64 64" aria-hidden="true"><use href={`/sprites.svg#hero-${roleSpriteId(p.role)}`} /></svg>
+          <span className="hero-art-window"><img src={playerSpriteUrl(p.role)} alt=""/></span>
         </div><div className="player-name">{p.nickname}{p.isCreator && <span className="host-badge">CREADOR</span>}<small>{p.online ? "En la sala" : "Reconectando…"}</small></div><span className={`role-pill ${p.role ? "selected" : ""}`}>{p.role ?? "Eligiendo rol"}</span></li>)}</ul>
-        <div className="role-select"><p className="eyebrow">ELEGÍ TU ROL</p><div className="roles">{GAME_CONFIG.roles.map(role => <button key={role} className={`role-card ${me?.role === role ? "active" : ""}`} onClick={() => chooseRole(role)} aria-pressed={me?.role === role}><span className={`role-icon role-${roleSpriteId(role)}`}><svg viewBox="0 0 64 64" aria-hidden="true"><use href={`/sprites.svg#hero-${roleSpriteId(role)}`} /></svg></span><strong>{role}</strong><small>{roleInfo[role]}<em>Enfriamiento: {ABILITY_COOLDOWNS[role]} preguntas</em></small></button>)}</div></div>
+        <div className="role-select"><p className="eyebrow">ELEGÍ TU ROL</p><div className="roles">{GAME_CONFIG.roles.map(role => <button key={role} className={`role-card ${me?.role === role ? "active" : ""}`} onClick={() => chooseRole(role)} aria-pressed={me?.role === role}><span className={`role-icon role-${roleSpriteId(role)}`}><span className="hero-art-window"><img src={playerSpriteUrl(role)} alt=""/></span></span><strong>{role}</strong><small>{roleInfo[role]}<em>Enfriamiento: {ABILITY_COOLDOWNS[role]} preguntas</em></small></button>)}</div></div>
         <DeckLoader room={room} busy={deckBusy} disabled={!me?.isCreator} onFile={uploadDeck}/>
         {error && <p role="status" className="message">{error}</p>}
         {me?.isCreator
@@ -231,7 +236,7 @@ function GameBoard({ room, meId, reveal, myPick, now, abilityNotice, shopNotice,
   abilityNotice: { playerId: string; nickname: string; role: Role; ability: Ability } | null;
   shopNotice: { coinsAwarded: number; enemiesDefeated: number } | null;
   onPick: (i: number) => void; onAbility: (a: Ability) => void; error: string;
-  onBuy: (item: "healing" | "revive" | "ward", targetId?: string) => void; onShopContinue: () => void;
+  onBuy: (item: Parameters<ClientEvents["game:shop:buy"]>[0]["item"], targetId?: string) => void; onShopContinue: () => void;
 }) {
   const game = room.game!;
   const me = room.players.find(p => p.id === meId);
@@ -252,18 +257,22 @@ function GameBoard({ room, meId, reveal, myPick, now, abilityNotice, shopNotice,
   return <div className="board">
     {abilityNotice && <div key={`${abilityNotice.playerId}-${abilityNotice.ability}-${game.turnNumber}`} className="ability-announcement" role="status"><span>{abilityInfo[abilityNotice.role].icon}</span><div><strong>{abilityNotice.nickname}</strong> activó <b>{abilityInfo[abilityNotice.role].name}</b></div></div>}
     {game.shopOpen && <section className="panel shop-panel" aria-label="Tienda de la mazmorra">
-      <header><div><p className="eyebrow">DESCANSO · {game.enemiesDefeated} ENEMIGOS</p><h2>Tienda del camino</h2><p>{shopNotice ? `El grupo ganó ${shopNotice.coinsAwarded} monedas por el último enemigo.` : "Cada enemigo deja entre 1 y 3 monedas para cada aventurero."}</p></div><span className="shop-wallet">◉ {me?.coins ?? 0}</span></header>
+      <header><div><p className="eyebrow">{game.enemiesDefeated ? `DESCANSO · ${game.enemiesDefeated} ENEMIGOS` : "ÚLTIMA OPORTUNIDAD"}</p><h2>{!room.players.some(p => !p.eliminated) ? "Reúnan al equipo" : "Tienda del camino"}</h2><p>{shopNotice?.coinsAwarded === 0 ? "El grupo cayó. Comprá una poción para seguir." : shopNotice ? `A cada aventurero le tocaron ${shopNotice.coinsAwarded} monedas por el último enemigo.` : "Cada enemigo deja entre 1 y 3 monedas para cada aventurero."}</p></div><span className="shop-wallet"><img src="/sprites/items/coin.png" alt=""/> {me?.coins ?? 0}</span></header>
       <div className="shop-items">
-        <article><div><strong>Poción de vida</strong><small>Recuperás hasta 2 corazones · 3 monedas</small></div><button disabled={!me || me.eliminated || me.hp >= me.maxHp || (me.coins ?? 0) < 3} onClick={() => onBuy("healing")}>Comprar</button></article>
-        <article><div><strong>Vial de resurrección</strong><small>Levanta a un compañero con 1 corazón · 8 monedas</small></div>{room.players.filter(p => p.eliminated).length ? room.players.filter(p => p.eliminated).map(p => <button key={p.id} disabled={(me?.coins ?? 0) < 8} onClick={() => onBuy("revive", p.id)}>Revivir a {p.nickname}</button>) : <button disabled>Sin caídos</button>}</article>
-        <article><div><strong>Sello protector</strong><small>Bloquea el próximo fallo del grupo · 5 monedas</small></div><button disabled={!me || game.teamWard || (me.coins ?? 0) < 5} onClick={() => onBuy("ward")}>Comprar</button></article>
+        <article><img src="/sprites/items/life-potion.png" alt=""/><div><strong>Poción de vida</strong><small>Recuperás hasta 2 corazones · 3 monedas</small></div><button disabled={!me || me.eliminated || me.hp >= me.maxHp || (me.coins ?? 0) < 3} onClick={() => onBuy("healing")}>Comprar</button></article>
+        <article><img src="/sprites/items/resurrection.png" alt=""/><div><strong>Vial de resurrección</strong><small>Devuelve a alguien con 1 corazón · 3 monedas</small></div><div className="shop-actions">{room.players.filter(p => p.eliminated).length ? room.players.filter(p => p.eliminated).map(p => <button key={p.id} disabled={(me?.coins ?? 0) < 3} onClick={() => onBuy("revive", p.id)}>Revivir a {p.nickname}</button>) : <button disabled>Sin caídos</button>}</div></article>
+        <article><img src="/sprites/items/medipack.png" alt=""/><div><strong>Botiquín grupal</strong><small>Cura 1 corazón al equipo · 7 monedas</small></div><button disabled={!me || !room.players.some(p => !p.eliminated && p.hp < p.maxHp) || (me.coins ?? 0) < 7} onClick={() => onBuy("partyHeal")}>Comprar</button></article>
+        <article><img src="/sprites/items/ward.png" alt=""/><div><strong>Sello protector</strong><small>Bloquea el próximo fallo · 5 monedas</small></div><button disabled={!me || game.teamWard || (me.coins ?? 0) < 5} onClick={() => onBuy("ward")}>Comprar</button></article>
+        <article><img src="/sprites/items/bomb.png" alt=""/><div><strong>Bomba de humo</strong><small>El próximo acierto hace +2 de daño · 6 monedas</small></div><button disabled={!me || game.bonusDamage > 0 || (me.coins ?? 0) < 6} onClick={() => onBuy("bomb")}>Comprar</button></article>
+        <article><img src="/sprites/items/focus.png" alt=""/><div><strong>Pergamino de enfoque</strong><small>Recarga las habilidades del grupo · 6 monedas</small></div><button disabled={!me || (me.coins ?? 0) < 6} onClick={() => onBuy("focus")}>Comprar</button></article>
+        <article><img src="/sprites/items/resurrection.png" alt=""/><div><strong>Alma fénix</strong><small>Resucita a todo el equipo caído · 12 monedas</small></div><button disabled={!me || !room.players.some(p => p.eliminated) || (me.coins ?? 0) < 12} onClick={() => onBuy("phoenix")}>Comprar</button></article>
       </div>
-      <button className="shop-continue" disabled={!creator} onClick={onShopContinue}>{creator ? "Seguir la aventura" : "Esperando al creador"}</button>
+      <button className="shop-continue" disabled={!creator || !room.players.some(p => !p.eliminated)} onClick={onShopContinue}>{!room.players.some(p => !p.eliminated) ? "Resucitá a alguien para continuar" : creator ? "Seguir la aventura" : "Esperando al creador"}</button>
     </section>}
     <section className="panel enemy-card">
       {enemy && <>
         <div className={`enemy-art ${reveal?.correct ? "struck" : reveal && !reveal.timeUp ? "attacking" : ""}`} data-enemy={enemy.id} role="img" aria-label={enemy.name}>
-          <svg className="enemy-sprite" viewBox="0 0 96 96" aria-hidden="true"><use href={`/sprites.svg#enemy-${enemy.id}`} /></svg>
+          <span className="enemy-sprite" style={{ backgroundImage: `url("/sprites/enemies/${enemy.id}.png")` }} aria-hidden="true" />
           {reveal?.correct && <span className="impact effect-hit" aria-hidden="true">✦</span>}
           {reveal && !reveal.correct && !reveal.timeUp && <span className="impact effect-miss" aria-hidden="true">✧</span>}
         </div>
@@ -305,26 +314,25 @@ function GameBoard({ room, meId, reveal, myPick, now, abilityNotice, shopNotice,
 
     <section className="panel crew-card">
       <p className="eyebrow">EL GRUPO</p>
-      <ul className="crew">{room.players.map(p => <li key={p.id} className={`${!p.online ? "offline" : ""} ${p.eliminated ? "down" : p.hp <= 1 ? "critical" : p.hp < p.maxHp ? "wounded" : ""}`}>
+      <ul className="crew">{room.players.map(p => <li key={p.id} className={`${!p.online ? "offline" : ""} ${p.eliminated ? "down" : ""}`}>
         <div className={`avatar character-sprite role-${roleSpriteId(p.role)}`} aria-label={p.role ?? "Aventurero"}>
-          <svg viewBox="0 0 64 64" aria-hidden="true"><use href={`/sprites.svg#hero-${roleSpriteId(p.role)}`} /></svg>
+          <span className="hero-art-window"><img src={playerSpriteUrl(p.role)} alt=""/></span>
           {reveal?.healedPlayer === p.nickname && <i className="effect-heal" aria-hidden="true">＋</i>}
           {reveal && !reveal.correct && <i className="effect-damage" aria-hidden="true">✦</i>}
+          {p.eliminated && <img className="death-marker" src="/sprites/tombstone.svg" alt="Caído"/>}
         </div>
-        <div className="crew-name"><strong>{p.nickname}</strong><small>{p.role ?? "sin rol"}</small><small className="crew-coins">◉ {p.coins ?? 0} monedas</small></div>
-        <div className={`vitality ${p.eliminated ? "knocked-out" : p.hp <= 1 ? "danger" : p.hp < p.maxHp ? "hurt" : "steady"}`} role="img" aria-label={`Vitalidad de ${p.nickname}: ${p.eliminated ? "caído" : p.hp <= 1 ? "en peligro" : p.hp < p.maxHp ? "herido" : "firme"}`}>
+        <div className="crew-name"><strong>{p.nickname}</strong><small>{p.role ?? "sin rol"}</small><small className="crew-coins"><img src="/sprites/items/coin.png" alt=""/>{p.coins ?? 0}</small></div>
+        <div className="vitality" role="img" aria-label={`Vida de ${p.nickname}: ${p.hp} de ${p.maxHp}`}>
           <span className="hearts">{Array.from({ length: p.maxHp }, (_, i) => <i key={i} className={i < p.hp ? "heart full" : "heart empty"} aria-hidden="true">{i < p.hp ? "♥" : "♡"}</i>)}</span>
-          <small>{p.eliminated ? "CAÍDO" : p.hp <= 1 ? "EN PELIGRO" : p.hp < p.maxHp ? "HERIDO" : "FIRME"}</small>
         </div>
         {(game.usedAbilities[p.id] ?? []).filter(ability => effectLabel[ability]).map(ability => <span key={ability} className="crew-effect">{effectLabel[ability]}</span>)}
-        {p.eliminated && <span className="down-tag">CAÍDO</span>}
       </li>)}</ul>
       <div className="abilities">
         {myAbility && <button className={`ability ${myActiveEffects.includes(myAbility.ability) || (myAbility.ability === "ward" && game.teamWard) ? "armed" : ""}`} disabled={!abilityReady} onClick={() => onAbility(myAbility.ability)}>
           {myAbility.icon} {myAbility.name}{abilityCooldown > 0 ? ` · ${abilityCooldown} preguntas` : abilityNeedsMoreOptions && shown.length <= 2 ? " · necesita 3 opciones" : " · LISTO"}
         </button>}
         {game.teamWard && <span className="team-effect">⬟ Muro Sagrado protege al grupo</span>}
-        {me?.eliminated && <span className="ability-note down">Caíste: quedás de espectadora</span>}
+        {me?.eliminated && <span className="ability-note down">Pueden resucitarte en la tienda</span>}
       </div>
     </section>
   </div>;

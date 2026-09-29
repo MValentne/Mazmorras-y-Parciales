@@ -98,14 +98,31 @@ export function clearTimers(room: GameRoom) {
 const alive = (room: GameRoom) => room.players.filter((p) => !p.eliminated);
 
 /**
- * Cierra la partida si corresponde. Son dos finales distintos: "abandoned" es que
- * se fueron todos (y la sala es memoria, no podemos esperar un reconnect eterno),
- * "lost" es que el equipo fue derrotado.
+ * Cierra la partida si corresponde. Si el equipo cae entero, pausa el combate en
+ * una tienda de emergencia para que pueda comprar una resurrección.
  * @returns true si la partida terminó.
  */
 function settle(room: GameRoom, hooks: EngineHooks) {
   if (!room.players.some((p) => p.online)) return finish(room, hooks, "abandoned"), true;
-  if (!alive(room).length) return finish(room, hooks, "lost"), true;
+  if (!alive(room).length) {
+    const g = room.game;
+    if (g) {
+      if (!g.shopOpen) {
+        clearTimers(room);
+        if (room.drawn && !room.remaining.some((card) => card.id === room.drawn?.id)) room.remaining.push(room.drawn);
+        room.drawn = null;
+        g.current = null;
+        g.shopOpen = true;
+        g.deadline = 0;
+        g.answerStartsAt = 0;
+        hooks.onState(room);
+        hooks.onShop?.(room, 0);
+      } else {
+        hooks.onState(room);
+      }
+    }
+    return true;
+  }
   return false;
 }
 
@@ -325,7 +342,7 @@ export function startGame(room: GameRoom, hooks: EngineHooks) {  if (room.status
     p.hp = GAME_CONFIG.playerMaxHp;
     p.maxHp = GAME_CONFIG.playerMaxHp;
     p.eliminated = false;
-    p.coins = 0;
+    p.coins = 3;
   }
   room.status = "playing";
   room.game = {
@@ -345,6 +362,7 @@ export function startGame(room: GameRoom, hooks: EngineHooks) {  if (room.status
     finishedAt: null,
     outcome: null,
     shopOpen: false,
+    bonusDamage: 0,
   };
   spawnEnemy(room);
   dealCard(room, hooks);
@@ -398,6 +416,8 @@ export function handleAnswer(room: GameRoom, hooks: EngineHooks, player: Player,
     damage += enemy.trait === "blindado" ? 1 : 2;
     consumeAbilityEffect(room, player, "strike");
   }
+  damage += g.bonusDamage;
+  g.bonusDamage = 0;
   enemy.hp = Math.max(0, enemy.hp - damage);
   g.mastered += 1;
 
@@ -417,10 +437,10 @@ export function handleAnswer(room: GameRoom, hooks: EngineHooks, player: Player,
   scheduleAdvance(room, hooks);
 }
 
-export function buyShopItem(room: GameRoom, hooks: EngineHooks, player: Player, item: "healing" | "revive" | "ward", targetId?: string) {
+export function buyShopItem(room: GameRoom, hooks: EngineHooks, player: Player, item: "healing" | "revive" | "phoenix" | "ward" | "partyHeal" | "bomb" | "focus", targetId?: string) {
   const g = room.game;
   if (!g || room.status !== "playing" || !g.shopOpen) return;
-  const prices = { healing: 3, revive: 8, ward: 5 } as const;
+  const prices = { healing: 3, revive: 3, phoenix: 12, ward: 5, partyHeal: 7, bomb: 6, focus: 6 } as const;
   const price = prices[item];
   if (player.coins < price) return hooks.onError(room, player.id, "NOT_ENOUGH_COINS", "No te alcanzan las monedas para ese objeto.");
   if (item === "healing") {
@@ -431,9 +451,25 @@ export function buyShopItem(room: GameRoom, hooks: EngineHooks, player: Player, 
     if (!target?.eliminated) return hooks.onError(room, player.id, "PLAYER_NOT_DOWN", "Ese compañero no necesita una poción de resurrección.");
     target.hp = 1;
     target.eliminated = false;
-  } else {
+  } else if (item === "phoenix") {
+    const downed = room.players.filter((mate) => mate.eliminated);
+    if (!downed.length) return hooks.onError(room, player.id, "NO_ONE_TO_REVIVE", "No hay compañeros caídos para revivir.");
+    for (const mate of downed) {
+      mate.hp = 1;
+      mate.eliminated = false;
+    }
+  } else if (item === "ward") {
     if (g.teamWard) return hooks.onError(room, player.id, "WARD_ALREADY_ACTIVE", "El Muro Sagrado ya está protegiendo al grupo.");
     g.teamWard = true;
+  } else if (item === "partyHeal") {
+    const injured = alive(room).filter((mate) => mate.hp < mate.maxHp);
+    if (!injured.length) return hooks.onError(room, player.id, "TEAM_AT_FULL_HEALTH", "Todo el grupo está con la vida completa.");
+    for (const mate of injured) mate.hp = Math.min(mate.maxHp, mate.hp + 1);
+  } else if (item === "bomb") {
+    if (g.bonusDamage > 0) return hooks.onError(room, player.id, "BOMB_ALREADY_ARMED", "Ya hay una bomba lista para el próximo ataque.");
+    g.bonusDamage += 2;
+  } else if (item === "focus") {
+    for (const mate of room.players) g.abilityReadyAt[mate.id] = g.turnNumber;
   }
   player.coins -= price;
   hooks.onState(room);
@@ -443,6 +479,7 @@ export function continueFromShop(room: GameRoom, hooks: EngineHooks, player: Pla
   const g = room.game;
   if (!g || room.status !== "playing" || !g.shopOpen) return;
   if (!player.isCreator) return hooks.onError(room, player.id, "NOT_CREATOR", "Solo quien creó la sala puede cerrar la tienda.");
+  if (!alive(room).length) return hooks.onError(room, player.id, "PARTY_DOWN", "Reviví al menos a un aventurero antes de seguir.");
   g.shopOpen = false;
   spawnEnemy(room);
   dealCard(room, hooks);

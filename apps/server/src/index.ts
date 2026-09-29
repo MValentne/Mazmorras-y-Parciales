@@ -248,7 +248,7 @@ io.on("connection", (socket: Socket<ClientEvents, ServerEvents>) => {
   socket.on("game:shop:buy", ({ item, targetId }) => {
     const ctx = roomOf(socket);
     if (!ctx) return;
-    if (!["healing", "revive", "ward"].includes(item)) return error(socket.id, "INVALID_ITEM", "Ese objeto no está en la tienda.");
+    if (!["healing", "revive", "phoenix", "ward", "partyHeal", "bomb", "focus"].includes(item)) return error(socket.id, "INVALID_ITEM", "Ese objeto no está en la tienda.");
     buyShopItem(ctx.room, hooks, ctx.player, item, targetId);
   });
 

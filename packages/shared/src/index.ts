@@ -111,6 +111,7 @@ export interface GameState {
   finishedAt: number | null;
   outcome: Outcome | null;
   shopOpen: boolean;
+  bonusDamage: number;
 }
 
 export interface RoomState {
@@ -150,7 +151,7 @@ export type ClientEvents = {
   "game:answer": (payload: { answer: number }) => void;
   "game:forfeit": () => void;
   "game:ability": (payload: { ability: Ability }) => void;
-  "game:shop:buy": (payload: { item: "healing" | "revive" | "ward"; targetId?: string }) => void;
+  "game:shop:buy": (payload: { item: "healing" | "revive" | "phoenix" | "ward" | "partyHeal" | "bomb" | "focus"; targetId?: string }) => void;
   "game:shop:continue": () => void;
   /** Vuelve al lobby desde la pantalla de resultados, para rearmar otra ronda. */
   "game:lobby": () => void;
