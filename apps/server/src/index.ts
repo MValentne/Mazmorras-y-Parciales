@@ -11,6 +11,7 @@ import {
   clearTimers,
   forfeitPlayer,
   handleAnswer,
+  reconcileVotes,
   buyShopItem,
   continueScene,
   continueFromShop,
@@ -122,6 +123,7 @@ io.on("connection", (socket: Socket<ClientEvents, ServerEvents>) => {
       drawn: null,
       discardedFor: null,
       wrongPlayers: new Set(),
+      votes: new Map(),
       timers: {},
     };
     rooms.set(code, room);
@@ -300,6 +302,7 @@ io.on("connection", (socket: Socket<ClientEvents, ServerEvents>) => {
       }
     }
     if (room.status === "playing" && room.game?.currentScene) reconcileSceneReady(room, hooks);
+    else if (room.status === "playing" && room.drawn) reconcileVotes(room, hooks);
     else publish(room);
   });
 });

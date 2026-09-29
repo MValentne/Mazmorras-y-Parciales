@@ -292,7 +292,7 @@ function GameBoard({ room, meId, reveal, myPick, now, abilityNotice, shopNotice,
   const total = preview ? GAME_CONFIG.promptPreviewSeconds * 1000 : Math.max(1, game.deadline - game.answerStartsAt);
   const left = Math.max(0, preview ? game.answerStartsAt - now : game.deadline - now);
   const shown = game.visibleOptions ?? game.current?.options.map((_, i) => i) ?? [];
-  const canAct = !me?.eliminated && !closed && !preview;
+  const canAct = !me?.eliminated && !closed && !preview && myPick === null;
   const myAbility = me?.role ? abilityInfo[me.role] : null;
   const myActiveEffects = game.usedAbilities[meId] ?? [];
   const abilityCooldown = me ? Math.max(0, (game.abilityReadyAt[me.id] ?? 0) - game.turnNumber - 1) : 0;
@@ -341,13 +341,14 @@ function GameBoard({ room, meId, reveal, myPick, now, abilityNotice, shopNotice,
           const isMyWrong = reveal && myPick === i && !reveal.correct;
           return <li key={i}>
             <button className={`option ${isCorrect ? "correct" : ""} ${isMyWrong ? "wrong" : ""} ${myPick === i && reveal?.correct ? "hit" : ""}`} disabled={closed || !canAct} onClick={() => onPick(i)}>
-              <span className="opt-index">{String.fromCharCode(65 + i)}</span>{game.current!.options[i]}
+              {game.current!.options[i]}
             </button>
           </li>;
         })}</ul>}
+        {!closed && !preview && myPick !== null && <p className="preview-hint" role="status">Voto registrado en secreto · {game.votesReceived} de {room.players.filter(player => player.online && !player.eliminated).length} votaron.</p>}
       </> : <p className="prompt waiting-prompt">Preparando la siguiente pregunta…</p>}
       {reveal && <div className={`reveal ${reveal.correct ? "good" : reveal.timeUp ? "timeup" : "bad"}`}>
-        <strong>{reveal.correct ? "¡Dominada!" : reveal.timeUp ? "Se acabó el tiempo" : "Fallaste"}</strong>
+        <strong>{reveal.timeUp ? "Se acabó el tiempo" : reveal.correct ? "Ronda resuelta" : "Fallaron"}</strong>
         {reveal.answer !== null && <span>Correcta: {game.current?.options[reveal.answer]}</span>}
         {reveal.correct && reveal.damage > 0 && <span>−{reveal.damage} de vida al enemigo</span>}
         {reveal.timeUp && <span>{reveal.wardBlocked ? "El Muro Sagrado bloqueó el daño para todo el grupo." : reveal.damage === 0 ? "Ya habías recibido daño por esta pregunta." : "Se agotó el tiempo: quienes aún no habían fallado perdieron 1 vida."}</span>}

@@ -144,6 +144,7 @@ export interface GameState {
   answerStartsAt: number;
   deadline: number;
   visibleOptions: number[] | null;
+  votesReceived: number;
   usedAbilities: Record<string, Ability[]>;
   turnNumber: number;
   abilityReadyAt: Record<string, number>;
@@ -178,6 +179,8 @@ export interface Reveal {
   timeUp: boolean;
   wardBlocked?: boolean;
   enemyDefeated: boolean;
+  correctVotes?: number;
+  wrongVotes?: number;
 }
 
 export type ClientEvents = {

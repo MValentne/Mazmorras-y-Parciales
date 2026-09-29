@@ -27,6 +27,7 @@ export type GameRoom = RoomState & {
   drawn: Card | null;
   discardedFor: string | null;
   wrongPlayers: Set<string>;
+  votes: Map<string, number>;
   timers: Timers;
 };
 
@@ -256,7 +257,7 @@ function armDeadline(room: GameRoom, hooks: EngineHooks) {
   const answerMs = room.settings.questionTimeSeconds * 1000;
   g.answerStartsAt = Date.now() + previewMs;
   g.deadline = g.answerStartsAt + answerMs;
-  room.timers.deadline = setTimeout(() => onTimeout(room, hooks), previewMs + answerMs);
+  room.timers.deadline = setTimeout(() => resolveVotes(room, hooks, true), previewMs + answerMs);
 }
 
 function spawnEnemy(room: GameRoom) {
@@ -317,7 +318,7 @@ function extendQuestion(room: GameRoom, hooks: EngineHooks) {
   if (!g) return;
   g.deadline += GAME_CONFIG.bardAbilitySeconds * 1000;
   if (room.timers.deadline) clearTimeout(room.timers.deadline);
-  room.timers.deadline = setTimeout(() => onTimeout(room, hooks), Math.max(0, g.deadline - Date.now()));
+  room.timers.deadline = setTimeout(() => resolveVotes(room, hooks, true), Math.max(0, g.deadline - Date.now()));
 }
 
 function finish(room: GameRoom, hooks: EngineHooks, outcome: Outcome) {
@@ -389,47 +390,82 @@ function dealCard(room: GameRoom, hooks: EngineHooks) {
   g.visibleOptions = visibleFor(room, card);
   room.discardedFor = null;
   room.wrongPlayers.clear();
+  room.votes.clear();
+  g.votesReceived = 0;
   armDeadline(room, hooks);
   hooks.onState(room);
 }
 
-function onTimeout(room: GameRoom, hooks: EngineHooks) {
+function resolveVotes(room: GameRoom, hooks: EngineHooks, timeUp = false) {
   const g = room.game;
   const card = room.drawn;
-  if (!g || room.status !== "playing" || !card) return;
-  if (settle(room, hooks)) return;
-  const wardBlocked = g.teamWard;
+  if (!g || !card || room.status !== "playing") return;
+  clearTimers(room);
+  const voters = alive(room).filter((player) => player.online);
+  const wrongPlayers = voters.filter((player) => room.votes.get(player.id) !== card.answer);
+  const correctPlayers = voters.filter((player) => room.votes.get(player.id) === card.answer);
+  const wardBlocked = g.teamWard && wrongPlayers.length > 0;
   if (wardBlocked) consumeTeamWard(room);
-  const timeoutPlayers = alive(room).filter((p) => !room.wrongPlayers.has(p.id));
-  if (!wardBlocked) {
-    for (const player of timeoutPlayers) {
-      player.hp = Math.max(0, player.hp - 1);
-      if (!player.hp) player.eliminated = true;
-    }
+  for (const player of wrongPlayers) {
+    const evaded = !wardBlocked && consumeShield(room, player);
+    if (wardBlocked || evaded) continue;
+    player.hp = Math.max(0, player.hp - 1);
+    if (!player.hp) player.eliminated = true;
   }
-
-  room.remaining.push({ type: "question", card });
-  const reveal: Reveal = {
-    correct: false,
-    answer: card.answer,
-    ...(card.explanation ? { explanation: card.explanation } : {}),
-    damage: wardBlocked || !timeoutPlayers.length ? 0 : 1,
-    wardBlocked,
-    healedPlayer: null,
-    healedAmount: 0,
-    timeUp: true,
-    enemyDefeated: false,
-  };
+  const enemy = g.enemy;
+  let damage = 0;
+  if (enemy) {
+    for (const player of correctPlayers) {
+      let hit = 1;
+      const active = activeAbilities(room, player);
+      if (player.role === "Guerrero" && active.includes("strike")) {
+        hit += enemy.trait === "blindado" ? 1 : 2;
+        consumeAbilityEffect(room, player, "strike");
+      }
+      damage += hit;
+    }
+    const hunter = room.players.find((mate) => mate.role === "Explorador" && activeAbilities(room, mate).includes("track"));
+    if (hunter && correctPlayers.length) { damage += 1; consumeAbilityEffect(room, hunter, "track"); }
+    if (correctPlayers.length) damage += g.bonusDamage;
+    g.bonusDamage = 0;
+    enemy.hp = Math.max(0, enemy.hp - damage);
+    g.mastered += correctPlayers.length;
+  }
   closeQuestion(room);
   hooks.onState(room);
   if (settle(room, hooks)) return;
-  hooks.onReveal(room, reveal);
+  hooks.onReveal(room, {
+    correct: correctPlayers.length > 0,
+    answer: card.answer,
+    ...(card.explanation ? { explanation: card.explanation } : {}),
+    damage,
+    healedPlayer: null,
+    healedAmount: 0,
+    timeUp,
+    wardBlocked,
+    enemyDefeated: Boolean(enemy && enemy.hp === 0),
+    correctVotes: correctPlayers.length,
+    wrongVotes: wrongPlayers.length,
+  });
   scheduleAdvance(room, hooks);
+}
+
+export function reconcileVotes(room: GameRoom, hooks: EngineHooks) {
+  const g = room.game;
+  if (!g || !room.drawn) return;
+  const required = alive(room).filter((player) => player.online);
+  if (required.length && required.every((player) => room.votes.has(player.id))) resolveVotes(room, hooks);
+  else hooks.onState(room);
+}
+
+function onTimeout(room: GameRoom, hooks: EngineHooks) {
+  resolveVotes(room, hooks, true);
 }
 
 export function startGame(room: GameRoom, hooks: EngineHooks) {  if (room.status !== "lobby" || !room.cards.length) return;
   clearTimers(room);
   room.wrongPlayers ??= new Set();
+  room.votes ??= new Map();
   room.timeline ??= room.cards.map((card): DeckEntry => ({ type: "question", card }));
   const limit = room.settings.cardCount > 0 ? Math.min(room.settings.cardCount, room.cards.length) : room.cards.length;
   const selected: DeckEntry[] = [];
@@ -465,6 +501,7 @@ export function startGame(room: GameRoom, hooks: EngineHooks) {  if (room.status
     answerStartsAt: 0,
     deadline: 0,
     visibleOptions: null,
+    votesReceived: 0,
     usedAbilities: {},
     turnNumber: 0,
     abilityReadyAt: {},
@@ -518,65 +555,12 @@ export function handleAnswer(room: GameRoom, hooks: EngineHooks, player: Player,
     return;
   }
   if (Date.now() > g.deadline) return;
-  if (!Number.isInteger(answer) || answer < 0 || answer >= card.options.length) return;
-
-  if (answer !== card.answer) {
-    const protectedByWard = g.teamWard;
-    if (protectedByWard) consumeTeamWard(room);
-    const evaded = !protectedByWard && consumeShield(room, player);
-    if (!protectedByWard && !evaded) {
-      room.wrongPlayers.add(player.id);
-      player.hp = Math.max(0, player.hp - 1);
-      if (!player.hp) player.eliminated = true;
-    }
-    hooks.onState(room);
-    // Si este fallo soltó al último del equipo, la partida se cierra ya: no tiene
-    // sentido dejar al grupo mirando una pregunta sin nadie que la conteste.
-    if (settle(room, hooks)) return;
-    hooks.onReveal(room, {
-      correct: false,
-      answer: null,
-      damage: protectedByWard || evaded ? 0 : 1,
-      healedPlayer: null,
-      healedAmount: 0,
-      timeUp: false,
-      enemyDefeated: false,
-    });
-    return;
-  }
-
-  const enemy = g.enemy;
-  if (!enemy) return;
-  const active = activeAbilities(room, player);
-  let damage = 1;
-  if (player.role === "Guerrero" && active.includes("strike")) {
-    damage += enemy.trait === "blindado" ? 1 : 2;
-    consumeAbilityEffect(room, player, "strike");
-  }
-  const hunter = room.players.find((mate) => mate.role === "Explorador" && activeAbilities(room, mate).includes("track"));
-  if (hunter) {
-    damage += 1;
-    consumeAbilityEffect(room, hunter, "track");
-  }
-  damage += g.bonusDamage;
-  g.bonusDamage = 0;
-  enemy.hp = Math.max(0, enemy.hp - damage);
-  g.mastered += 1;
-
-  const reveal: Reveal = {
-    correct: true,
-    answer: card.answer,
-    ...(card.explanation ? { explanation: card.explanation } : {}),
-    damage,
-    healedPlayer: null,
-    healedAmount: 0,
-    timeUp: false,
-    enemyDefeated: enemy.hp === 0,
-  };
-  closeQuestion(room);
-  hooks.onState(room);
-  hooks.onReveal(room, reveal);
-  scheduleAdvance(room, hooks);
+  if (!Number.isInteger(answer) || answer < 0 || answer >= card.options.length || room.votes.has(player.id)) return;
+  room.votes.set(player.id, answer);
+  g.votesReceived = room.votes.size;
+  const required = alive(room).filter((mate) => mate.online);
+  if (required.length && required.every((mate) => room.votes.has(mate.id))) resolveVotes(room, hooks);
+  else hooks.onState(room);
 }
 
 export function buyShopItem(room: GameRoom, hooks: EngineHooks, player: Player, item: "healing" | "revive" | "phoenix" | "ward" | "partyHeal" | "bomb" | "focus", targetId?: string) {
