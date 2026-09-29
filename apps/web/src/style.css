@@ -403,3 +403,40 @@ button:disabled { opacity: .55; cursor: wait; }
 @keyframes team-flare { 0% { opacity: .45; transform: translateY(5px) scale(.95); } 70% { opacity: 1; transform: translateY(-2px) scale(1.03); } 100% { transform: none; } }
 @media (max-width: 520px) { .ability-announcement { top: 2px; padding: 8px 10px; } .ability-announcement > span { flex-basis: 32px; width: 32px; height: 32px; font-size: 18px; } }
 @media (prefers-reduced-motion: reduce) { .ability-announcement, .team-effect, .crew li.critical, .vitality.danger .heart.full { animation: none !important; } }
+
+/* Interfaz de grupo y tienda: jerarquía simple, fondos planos y datos legibles. */
+.crew-card { background: #211f1b; border: 1px solid #48443c; border-radius: 10px; box-shadow: none; }
+.crew-card > .eyebrow { color: #bdb5a5; font-size: 10px; letter-spacing: .12em; }
+.crew { grid-template-columns: repeat(auto-fit, minmax(205px, 1fr)); gap: 7px; }
+.crew li, .crew li:not(.down) { min-height: 68px; padding: 7px 9px; border: 1px solid #454139; border-radius: 7px; background: #292722; box-shadow: none; animation: none; }
+.crew li.down { filter: none; background: #292321; border-color: #60403a; }
+.crew .character-sprite { flex-basis: 46px; width: 46px; height: 46px; border: 0; border-radius: 5px; background: #34312b; }
+.crew .character-sprite svg { filter: none; animation: none; }
+.crew-name strong { color: #eee9df; font: 600 12px/1.3 system-ui, sans-serif; }
+.crew-name small { color: #aaa497; font-size: 10px; }
+.crew-name .crew-coins { color: #e1c47c; }
+.crew li.critical { border-color: #a2594c; background: #342421; box-shadow: none; animation: none; }
+.crew-effect { top: auto; bottom: 4px; right: 7px; border-color: #665b46; border-radius: 4px; color: #d8c79f; background: #37332b; box-shadow: none; }
+.abilities { border-color: #454139; }
+.ability { border-radius: 6px; box-shadow: none; text-shadow: none; }
+.shop-panel { grid-column: 1 / -1; padding: 18px 20px; border: 1px solid #66583e; border-radius: 10px; background: #24221d; box-shadow: 0 7px 20px #0005; }
+.board:has(.shop-panel) .shop-panel { grid-row: 1; }
+.board:has(.shop-panel) .enemy-card { grid-row: 2; }
+.board:has(.shop-panel) .crew-card { grid-row: 3; }
+.board:has(.shop-panel) .question-card { grid-row: 4; }
+.shop-panel > header { display: flex; justify-content: space-between; align-items: start; gap: 16px; padding-bottom: 13px; border-bottom: 1px solid #454139; }
+.shop-panel .eyebrow { margin: 0 0 4px; color: #c4a96c; }
+.shop-panel h2 { margin: 0; color: #f0e8d8; font: 600 20px/1.3 system-ui, sans-serif; }
+.shop-panel header p:last-child { margin: 5px 0 0; color: #aaa497; font-size: 12px; }
+.shop-wallet { flex: 0 0 auto; padding: 7px 10px; border: 1px solid #5c5139; border-radius: 6px; color: #f0d48d; background: #302c23; font: 700 13px ui-monospace, monospace; }
+.shop-items { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 12px 0; }
+.shop-items article { display: flex; flex-direction: column; align-items: start; justify-content: space-between; gap: 12px; min-height: 108px; padding: 12px; border: 1px solid #454139; border-radius: 7px; background: #2b2924; }
+.shop-items strong, .shop-items small { display: block; }
+.shop-items strong { color: #ece5d8; font-size: 12px; }
+.shop-items small { margin-top: 4px; color: #aaa497; font-size: 10px; line-height: 1.45; }
+.shop-items button, .shop-continue { padding: 7px 10px; border: 1px solid #76613b; border-radius: 5px; color: #efdfbb; background: #423823; font-size: 11px; font-weight: 650; }
+.shop-items button:disabled, .shop-continue:disabled { color: #8c877c; background: #33312b; border-color: #49463e; }
+.shop-continue { width: 100%; padding: 10px; color: #201b12; border-color: #d3b66e; background: #d3b66e; }
+.shop-continue:disabled { color: #b7b0a2; background: #3a3832; border-color: #4b4840; }
+.role-clerigo { box-shadow: 0 0 0 1px #43c99455; }
+@media (max-width: 700px) { .shop-items { grid-template-columns: 1fr; } .shop-items article { min-height: 0; flex-direction: row; align-items: center; } .crew { grid-template-columns: repeat(auto-fit, minmax(165px, 1fr)); } }

@@ -61,6 +61,7 @@ export default function App() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [leavingRoom, setLeavingRoom] = useState(false);
   const [abilityNotice, setAbilityNotice] = useState<{ playerId: string; nickname: string; role: Role; ability: Ability } | null>(null);
+  const [shopNotice, setShopNotice] = useState<{ coinsAwarded: number; enemiesDefeated: number } | null>(null);
   const playerId = useMemo(getPlayerId, []);
 
   useEffect(() => {
@@ -89,6 +90,7 @@ export default function App() {
       }, GAME_CONFIG.answerRevealMs);
     });
     client.on("game:ability", setAbilityNotice);
+    client.on("game:shop", setShopNotice);
     client.on("connect", () => {
       const savedCode = sessionStorage.getItem("dungeon-room-code");
       const pathCode = window.location.pathname.match(/^\/sala\/([^/]+)\/?$/i)?.[1]?.toUpperCase();
@@ -172,7 +174,7 @@ export default function App() {
       <header className="top battle-nav"><div className="brand">✦ <span>Dungeon de Estudio</span></div><div className="battle-nav-actions"><span className="live"><i/> Sala {room.code}</span><button className="secondary nav-toggle" onClick={() => setMenuOpen(v => !v)} aria-expanded={menuOpen}>☰ Menú</button></div>
         {menuOpen && <nav className="game-menu" aria-label="Menú de partida"><strong>¿Qué querés hacer?</strong><button disabled={me?.eliminated} onClick={() => { socket?.emit("game:forfeit"); setMenuOpen(false); }}>Abandonar el combate</button><small>Vas a quedar como espectador mientras el grupo sigue.</small><button className="leave-action" disabled={leavingRoom} onClick={leaveRoom}>{leavingRoom ? "Saliendo…" : "Salir de la sala"}</button></nav>}
       </header>
-      <GameBoard room={room} meId={playerId} reveal={reveal} myPick={myPick} now={now} abilityNotice={abilityNotice} onPick={i => { setMyPick(i); socket?.emit("game:answer", { answer: i }); }} onAbility={a => socket?.emit("game:ability", { ability: a })} error={error}/>
+      <GameBoard room={room} meId={playerId} reveal={reveal} myPick={myPick} now={now} abilityNotice={abilityNotice} shopNotice={shopNotice} onPick={i => { setMyPick(i); socket?.emit("game:answer", { answer: i }); }} onAbility={a => socket?.emit("game:ability", { ability: a })} onBuy={(item, targetId) => socket?.emit("game:shop:buy", { item, targetId })} onShopContinue={() => socket?.emit("game:shop:continue")} error={error}/>
     </main>
   );
 
@@ -224,13 +226,16 @@ function DeckLoader({ room, busy, disabled, onFile }: { room: RoomState; busy: b
   </div>;
 }
 
-function GameBoard({ room, meId, reveal, myPick, now, abilityNotice, onPick, onAbility, error }: {
+function GameBoard({ room, meId, reveal, myPick, now, abilityNotice, shopNotice, onPick, onAbility, onBuy, onShopContinue, error }: {
   room: RoomState; meId: string; reveal: Reveal | null; myPick: number | null; now: number;
   abilityNotice: { playerId: string; nickname: string; role: Role; ability: Ability } | null;
+  shopNotice: { coinsAwarded: number; enemiesDefeated: number } | null;
   onPick: (i: number) => void; onAbility: (a: Ability) => void; error: string;
+  onBuy: (item: "healing" | "revive" | "ward", targetId?: string) => void; onShopContinue: () => void;
 }) {
   const game = room.game!;
   const me = room.players.find(p => p.id === meId);
+  const creator = Boolean(me?.isCreator);
   const enemy = game.enemy;
   const closed = game.deadline === 0;
   const preview = !closed && now < game.answerStartsAt;
@@ -246,6 +251,15 @@ function GameBoard({ room, meId, reveal, myPick, now, abilityNotice, onPick, onA
 
   return <div className="board">
     {abilityNotice && <div key={`${abilityNotice.playerId}-${abilityNotice.ability}-${game.turnNumber}`} className="ability-announcement" role="status"><span>{abilityInfo[abilityNotice.role].icon}</span><div><strong>{abilityNotice.nickname}</strong> activó <b>{abilityInfo[abilityNotice.role].name}</b></div></div>}
+    {game.shopOpen && <section className="panel shop-panel" aria-label="Tienda de la mazmorra">
+      <header><div><p className="eyebrow">DESCANSO · {game.enemiesDefeated} ENEMIGOS</p><h2>Tienda del camino</h2><p>{shopNotice ? `El grupo ganó ${shopNotice.coinsAwarded} monedas por el último enemigo.` : "Cada enemigo deja entre 1 y 3 monedas para cada aventurero."}</p></div><span className="shop-wallet">◉ {me?.coins ?? 0}</span></header>
+      <div className="shop-items">
+        <article><div><strong>Poción de vida</strong><small>Recuperás hasta 2 corazones · 3 monedas</small></div><button disabled={!me || me.eliminated || me.hp >= me.maxHp || (me.coins ?? 0) < 3} onClick={() => onBuy("healing")}>Comprar</button></article>
+        <article><div><strong>Vial de resurrección</strong><small>Levanta a un compañero con 1 corazón · 8 monedas</small></div>{room.players.filter(p => p.eliminated).length ? room.players.filter(p => p.eliminated).map(p => <button key={p.id} disabled={(me?.coins ?? 0) < 8} onClick={() => onBuy("revive", p.id)}>Revivir a {p.nickname}</button>) : <button disabled>Sin caídos</button>}</article>
+        <article><div><strong>Sello protector</strong><small>Bloquea el próximo fallo del grupo · 5 monedas</small></div><button disabled={!me || game.teamWard || (me.coins ?? 0) < 5} onClick={() => onBuy("ward")}>Comprar</button></article>
+      </div>
+      <button className="shop-continue" disabled={!creator} onClick={onShopContinue}>{creator ? "Seguir la aventura" : "Esperando al creador"}</button>
+    </section>}
     <section className="panel enemy-card">
       {enemy && <>
         <div className={`enemy-art ${reveal?.correct ? "struck" : reveal && !reveal.timeUp ? "attacking" : ""}`} data-enemy={enemy.id} role="img" aria-label={enemy.name}>
@@ -281,7 +295,7 @@ function GameBoard({ room, meId, reveal, myPick, now, abilityNotice, onPick, onA
         <strong>{reveal.correct ? "¡Dominada!" : reveal.timeUp ? "Se acabó el tiempo" : "Fallaste"}</strong>
         {reveal.answer !== null && <span>Correcta: {game.current?.options[reveal.answer]}</span>}
         {reveal.correct && reveal.damage > 0 && <span>−{reveal.damage} de vida al enemigo</span>}
-        {reveal.timeUp && <span>{reveal.damage === 0 ? "El Muro Sagrado bloqueó el daño para todo el grupo." : "Se agotó el tiempo: cada aventurero perdió 1 vida."}</span>}
+        {reveal.timeUp && <span>{reveal.wardBlocked ? "El Muro Sagrado bloqueó el daño para todo el grupo." : reveal.damage === 0 ? "Ya habías recibido daño por esta pregunta." : "Se agotó el tiempo: quienes aún no habían fallado perdieron 1 vida."}</span>}
         {reveal.healedPlayer && <span>{reveal.healedPlayer} recuperó {reveal.healedAmount} de vida</span>}
         {!reveal.correct && !reveal.timeUp && reveal.damage === 0 && <span>Una protección anuló el daño.</span>}
         {reveal.explanation && <p>{reveal.explanation}</p>}
@@ -297,7 +311,7 @@ function GameBoard({ room, meId, reveal, myPick, now, abilityNotice, onPick, onA
           {reveal?.healedPlayer === p.nickname && <i className="effect-heal" aria-hidden="true">＋</i>}
           {reveal && !reveal.correct && <i className="effect-damage" aria-hidden="true">✦</i>}
         </div>
-        <div className="crew-name"><strong>{p.nickname}</strong><small>{p.role ?? "sin rol"}</small></div>
+        <div className="crew-name"><strong>{p.nickname}</strong><small>{p.role ?? "sin rol"}</small><small className="crew-coins">◉ {p.coins ?? 0} monedas</small></div>
         <div className={`vitality ${p.eliminated ? "knocked-out" : p.hp <= 1 ? "danger" : p.hp < p.maxHp ? "hurt" : "steady"}`} role="img" aria-label={`Vitalidad de ${p.nickname}: ${p.eliminated ? "caído" : p.hp <= 1 ? "en peligro" : p.hp < p.maxHp ? "herido" : "firme"}`}>
           <span className="hearts">{Array.from({ length: p.maxHp }, (_, i) => <i key={i} className={i < p.hp ? "heart full" : "heart empty"} aria-hidden="true">{i < p.hp ? "♥" : "♡"}</i>)}</span>
           <small>{p.eliminated ? "CAÍDO" : p.hp <= 1 ? "EN PELIGRO" : p.hp < p.maxHp ? "HERIDO" : "FIRME"}</small>

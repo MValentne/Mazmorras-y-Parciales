@@ -11,6 +11,8 @@ import {
   clearTimers,
   forfeitPlayer,
   handleAnswer,
+  buyShopItem,
+  continueFromShop,
   publicView,
   startGame,
   useAbility,
@@ -53,6 +55,7 @@ const hooks: EngineHooks = {
   onAbility: (room, player, ability) => {
     if (player.role) io.to(room.code).emit("game:ability", { playerId: player.id, nickname: player.nickname, role: player.role, ability });
   },
+  onShop: (room, coinsAwarded) => io.to(room.code).emit("game:shop", { coinsAwarded, enemiesDefeated: room.game?.enemiesDefeated ?? 0 }),
   onError: (room, playerId, code, message) => {
     const socketId = room.sockets.get(playerId);
     if (socketId) error(socketId, code, message);
@@ -92,6 +95,7 @@ const newPlayer = (id: string, nickname: string, isCreator: boolean): Player => 
   hp: GAME_CONFIG.playerMaxHp,
   maxHp: GAME_CONFIG.playerMaxHp,
   eliminated: false,
+  coins: 0,
 });
 
 io.on("connection", (socket: Socket<ClientEvents, ServerEvents>) => {
@@ -114,6 +118,7 @@ io.on("connection", (socket: Socket<ClientEvents, ServerEvents>) => {
       remaining: [],
       drawn: null,
       discardedFor: null,
+      wrongPlayers: new Set(),
       timers: {},
     };
     rooms.set(code, room);
@@ -238,6 +243,19 @@ io.on("connection", (socket: Socket<ClientEvents, ServerEvents>) => {
     if (!ctx) return;
     if (!Object.values(ROLE_ABILITIES).includes(ability)) return error(socket.id, "INVALID_ABILITY", "Esa habilidad no existe.");
     useAbility(ctx.room, hooks, ctx.player, ability as Ability);
+  });
+
+  socket.on("game:shop:buy", ({ item, targetId }) => {
+    const ctx = roomOf(socket);
+    if (!ctx) return;
+    if (!["healing", "revive", "ward"].includes(item)) return error(socket.id, "INVALID_ITEM", "Ese objeto no está en la tienda.");
+    buyShopItem(ctx.room, hooks, ctx.player, item, targetId);
+  });
+
+  socket.on("game:shop:continue", () => {
+    const ctx = roomOf(socket);
+    if (!ctx) return;
+    continueFromShop(ctx.room, hooks, ctx.player);
   });
 
   socket.on("game:lobby", () => {

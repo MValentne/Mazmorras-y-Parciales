@@ -80,6 +80,7 @@ export interface Player {
   hp: number;
   maxHp: number;
   eliminated: boolean;
+  coins: number;
 }
 
 export interface RoomSettings {
@@ -109,6 +110,7 @@ export interface GameState {
   startedAt: number;
   finishedAt: number | null;
   outcome: Outcome | null;
+  shopOpen: boolean;
 }
 
 export interface RoomState {
@@ -131,6 +133,7 @@ export interface Reveal {
   healedPlayer: string | null;
   healedAmount: number;
   timeUp: boolean;
+  wardBlocked?: boolean;
   enemyDefeated: boolean;
 }
 
@@ -147,6 +150,8 @@ export type ClientEvents = {
   "game:answer": (payload: { answer: number }) => void;
   "game:forfeit": () => void;
   "game:ability": (payload: { ability: Ability }) => void;
+  "game:shop:buy": (payload: { item: "healing" | "revive" | "ward"; targetId?: string }) => void;
+  "game:shop:continue": () => void;
   /** Vuelve al lobby desde la pantalla de resultados, para rearmar otra ronda. */
   "game:lobby": () => void;
 };
@@ -160,4 +165,5 @@ export type ServerEvents = {
   "room:left": () => void;
   "game:reveal": (reveal: Reveal) => void;
   "game:ability": (announcement: { playerId: string; nickname: string; role: Role; ability: Ability }) => void;
+  "game:shop": (shop: { coinsAwarded: number; enemiesDefeated: number }) => void;
 };

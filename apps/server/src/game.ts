@@ -22,6 +22,7 @@ export type GameRoom = RoomState & {
   remaining: Card[];
   drawn: Card | null;
   discardedFor: string | null;
+  wrongPlayers: Set<string>;
   timers: Timers;
 };
 
@@ -30,6 +31,7 @@ export type EngineHooks = {
   onReveal: (room: GameRoom, reveal: Reveal) => void;
   onError: (room: GameRoom, playerId: string, code: string, message: string) => void;
   onAbility?: (room: GameRoom, player: Player, ability: Ability) => void;
+  onShop?: (room: GameRoom, coinsAwarded: number) => void;
 };
 
 const clean = (value: unknown, max: number) =>
@@ -244,8 +246,16 @@ function advance(room: GameRoom, hooks: EngineHooks) {
   if (settle(room, hooks)) return;
   if (g.enemy && g.enemy.hp === 0) {
     g.enemiesDefeated += 1;
+    const coinsAwarded = randomInt(1, 4);
+    for (const player of room.players) player.coins += coinsAwarded;
     g.enemy = null;
     if (!room.remaining.length) return finish(room, hooks, "won");
+    if (g.enemiesDefeated % 5 === 0) {
+      g.shopOpen = true;
+      hooks.onState(room);
+      hooks.onShop?.(room, coinsAwarded);
+      return;
+    }
     spawnEnemy(room);
   }
   dealCard(room, hooks);
@@ -265,6 +275,7 @@ function dealCard(room: GameRoom, hooks: EngineHooks) {
   g.current = { id: card.id, prompt: card.prompt, options: card.options };
   g.visibleOptions = visibleFor(room, card);
   room.discardedFor = null;
+  room.wrongPlayers.clear();
   armDeadline(room, hooks);
   hooks.onState(room);
 }
@@ -276,8 +287,9 @@ function onTimeout(room: GameRoom, hooks: EngineHooks) {
   if (settle(room, hooks)) return;
   const wardBlocked = g.teamWard;
   if (wardBlocked) consumeTeamWard(room);
-  else {
-    for (const player of alive(room)) {
+  const timeoutPlayers = alive(room).filter((p) => !room.wrongPlayers.has(p.id));
+  if (!wardBlocked) {
+    for (const player of timeoutPlayers) {
       player.hp = Math.max(0, player.hp - 1);
       if (!player.hp) player.eliminated = true;
     }
@@ -288,7 +300,8 @@ function onTimeout(room: GameRoom, hooks: EngineHooks) {
     correct: false,
     answer: card.answer,
     ...(card.explanation ? { explanation: card.explanation } : {}),
-    damage: wardBlocked ? 0 : 1,
+    damage: wardBlocked || !timeoutPlayers.length ? 0 : 1,
+    wardBlocked,
     healedPlayer: null,
     healedAmount: 0,
     timeUp: true,
@@ -303,6 +316,7 @@ function onTimeout(room: GameRoom, hooks: EngineHooks) {
 
 export function startGame(room: GameRoom, hooks: EngineHooks) {  if (room.status !== "lobby" || !room.cards.length) return;
   clearTimers(room);
+  room.wrongPlayers ??= new Set();
   const limit = room.settings.cardCount > 0 ? Math.min(room.settings.cardCount, room.cards.length) : room.cards.length;
   room.remaining = shuffle(room.cards.slice(0, limit));
   room.drawn = null;
@@ -311,6 +325,7 @@ export function startGame(room: GameRoom, hooks: EngineHooks) {  if (room.status
     p.hp = GAME_CONFIG.playerMaxHp;
     p.maxHp = GAME_CONFIG.playerMaxHp;
     p.eliminated = false;
+    p.coins = 0;
   }
   room.status = "playing";
   room.game = {
@@ -329,6 +344,7 @@ export function startGame(room: GameRoom, hooks: EngineHooks) {  if (room.status
     startedAt: Date.now(),
     finishedAt: null,
     outcome: null,
+    shopOpen: false,
   };
   spawnEnemy(room);
   dealCard(room, hooks);
@@ -354,6 +370,7 @@ export function handleAnswer(room: GameRoom, hooks: EngineHooks, player: Player,
     if (protectedByWard) consumeTeamWard(room);
     const evaded = !protectedByWard && consumeShield(room, player);
     if (!protectedByWard && !evaded) {
+      room.wrongPlayers.add(player.id);
       player.hp = Math.max(0, player.hp - 1);
       if (!player.hp) player.eliminated = true;
     }
@@ -398,6 +415,37 @@ export function handleAnswer(room: GameRoom, hooks: EngineHooks, player: Player,
   hooks.onState(room);
   hooks.onReveal(room, reveal);
   scheduleAdvance(room, hooks);
+}
+
+export function buyShopItem(room: GameRoom, hooks: EngineHooks, player: Player, item: "healing" | "revive" | "ward", targetId?: string) {
+  const g = room.game;
+  if (!g || room.status !== "playing" || !g.shopOpen) return;
+  const prices = { healing: 3, revive: 8, ward: 5 } as const;
+  const price = prices[item];
+  if (player.coins < price) return hooks.onError(room, player.id, "NOT_ENOUGH_COINS", "No te alcanzan las monedas para ese objeto.");
+  if (item === "healing") {
+    if (player.eliminated || player.hp >= player.maxHp) return hooks.onError(room, player.id, "HEAL_NOT_NEEDED", "Necesitás estar herido para usar una poción.");
+    player.hp = Math.min(player.maxHp, player.hp + 2);
+  } else if (item === "revive") {
+    const target = room.players.find((mate) => mate.id === targetId);
+    if (!target?.eliminated) return hooks.onError(room, player.id, "PLAYER_NOT_DOWN", "Ese compañero no necesita una poción de resurrección.");
+    target.hp = 1;
+    target.eliminated = false;
+  } else {
+    if (g.teamWard) return hooks.onError(room, player.id, "WARD_ALREADY_ACTIVE", "El Muro Sagrado ya está protegiendo al grupo.");
+    g.teamWard = true;
+  }
+  player.coins -= price;
+  hooks.onState(room);
+}
+
+export function continueFromShop(room: GameRoom, hooks: EngineHooks, player: Player) {
+  const g = room.game;
+  if (!g || room.status !== "playing" || !g.shopOpen) return;
+  if (!player.isCreator) return hooks.onError(room, player.id, "NOT_CREATOR", "Solo quien creó la sala puede cerrar la tienda.");
+  g.shopOpen = false;
+  spawnEnemy(room);
+  dealCard(room, hooks);
 }
 
 export function useAbility(room: GameRoom, hooks: EngineHooks, player: Player, ability: Ability) {
