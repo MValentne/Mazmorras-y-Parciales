@@ -3,6 +3,7 @@ import {
   ENEMIES,
   ABILITY_COOLDOWNS,
   GAME_CONFIG,
+  getShopPrices,
   ROLE_ABILITIES,
   type Ability,
   type Card,
@@ -177,10 +178,11 @@ function settle(room: GameRoom, hooks: EngineHooks) {
   if (!alive(room).length) {
     const g = room.game;
     if (g) {
-      const canAffordRevival = room.players.some((player) => player.coins >= 3);
+      const revivalPrice = getShopPrices(room.players.length).revive;
+      const canAffordRevival = room.players.some((player) => player.coins >= revivalPrice);
       if (!canAffordRevival && g.emergencyRescueGranted) return finish(room, hooks, "lost"), true;
       if (!canAffordRevival && !g.emergencyRescueGranted) {
-        for (const player of room.players) player.coins = Math.max(3, player.coins);
+        for (const player of room.players) player.coins = Math.max(revivalPrice, player.coins);
         g.emergencyRescueGranted = true;
       }
       if (!g.shopOpen) {
@@ -551,6 +553,11 @@ export function handleAnswer(room: GameRoom, hooks: EngineHooks, player: Player,
     damage += enemy.trait === "blindado" ? 1 : 2;
     consumeAbilityEffect(room, player, "strike");
   }
+  const hunter = room.players.find((mate) => mate.role === "Explorador" && activeAbilities(room, mate).includes("track"));
+  if (hunter) {
+    damage += 1;
+    consumeAbilityEffect(room, hunter, "track");
+  }
   damage += g.bonusDamage;
   g.bonusDamage = 0;
   enemy.hp = Math.max(0, enemy.hp - damage);
@@ -575,7 +582,7 @@ export function handleAnswer(room: GameRoom, hooks: EngineHooks, player: Player,
 export function buyShopItem(room: GameRoom, hooks: EngineHooks, player: Player, item: "healing" | "revive" | "phoenix" | "ward" | "partyHeal" | "bomb" | "focus", targetId?: string) {
   const g = room.game;
   if (!g || room.status !== "playing" || !g.shopOpen) return;
-  const prices = { healing: 3, revive: 3, phoenix: 12, ward: 5, partyHeal: 7, bomb: 6, focus: 6 } as const;
+  const prices = getShopPrices(room.players.length);
   const price = prices[item];
   if (player.coins < price) return hooks.onError(room, player.id, "NOT_ENOUGH_COINS", "No te alcanzan las monedas para ese objeto.");
   if (item === "healing") {
@@ -685,11 +692,6 @@ export function useAbility(room: GameRoom, hooks: EngineHooks, player: Player, a
       used();
       break;
     case "track": {
-      if (!card || !g.visibleOptions || g.visibleOptions.length <= 2) {
-        hooks.onError(room, player.id, "NO_OPTIONS_TO_TRACK", "El Rastreo necesita al menos tres opciones visibles.");
-        return;
-      }
-      g.visibleOptions = narrow(g.visibleOptions, card.answer, g.visibleOptions.length - 1);
       used();
       break;
     }

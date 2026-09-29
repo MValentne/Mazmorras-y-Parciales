@@ -56,6 +56,15 @@ export const ABILITY_COOLDOWNS: Record<Role, number> = {
   Bardo: 3, "Paladín": 4, Explorador: 3, Alquimista: 4,
 };
 
+export const SHOP_BASE_PRICES = { healing: 3, revive: 3, phoenix: 12, ward: 5, partyHeal: 7, bomb: 6, focus: 6 } as const;
+export type ShopItem = keyof typeof SHOP_BASE_PRICES;
+
+/** Suma una moneda por cada integrante que supere el grupo base de dos. */
+export function getShopPrices(playerCount: number) {
+  const surcharge = Math.max(0, Math.floor(playerCount) - 2);
+  return Object.fromEntries(Object.entries(SHOP_BASE_PRICES).map(([item, price]) => [item, price + surcharge])) as Record<ShopItem, number>;
+}
+
 export interface Card {
   id: string;
   prompt: string;
