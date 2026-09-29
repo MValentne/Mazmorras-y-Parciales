@@ -406,13 +406,15 @@ function resolveVotes(room: GameRoom, hooks: EngineHooks, timeUp = false) {
   const correctPlayers = voters.filter((player) => room.votes.get(player.id) === card.answer);
   const wardBlocked = g.teamWard && wrongPlayers.length > 0;
   if (wardBlocked) consumeTeamWard(room);
+  const enemy = g.enemy;
+  let playersDamaged = 0;
   for (const player of wrongPlayers) {
     const evaded = !wardBlocked && consumeShield(room, player);
     if (wardBlocked || evaded) continue;
-    player.hp = Math.max(0, player.hp - 1);
+    player.hp = Math.max(0, player.hp - (enemy?.trait === "furioso" ? 2 : 1));
     if (!player.hp) player.eliminated = true;
+    playersDamaged++;
   }
-  const enemy = g.enemy;
   let damage = 0;
   if (enemy) {
     for (const player of correctPlayers) {
@@ -428,7 +430,11 @@ function resolveVotes(room: GameRoom, hooks: EngineHooks, timeUp = false) {
     if (hunter && correctPlayers.length) { damage += 1; consumeAbilityEffect(room, hunter, "track"); }
     if (correctPlayers.length) damage += g.bonusDamage;
     g.bonusDamage = 0;
+    if (enemy.trait === "escurridizo" && damage > 0) damage -= 1;
     enemy.hp = Math.max(0, enemy.hp - damage);
+    if (enemy.trait === "vampiro" && playersDamaged > 0 && enemy.hp > 0) {
+      enemy.hp = Math.min(enemy.maxHp, enemy.hp + 1);
+    }
     g.mastered += correctPlayers.length;
   }
   closeQuestion(room);

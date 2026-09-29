@@ -50,6 +50,9 @@ const playerSpriteUrl = (role: Role | null) => `/sprites/characters/${role ? rol
 const TRAIT_INFO: Record<string, string> = {
   mudo: "Mudo · muestra menos opciones",
   blindado: "Blindado · ignora el daño doble",
+  furioso: "Furioso · hace el doble de daño al fallar",
+  vampiro: "Vampiro · se cura 1 PV si alguien falla",
+  escurridizo: "Escurridizo · esquiva 1 punto de daño recibido",
 };
 
 export default function App() {

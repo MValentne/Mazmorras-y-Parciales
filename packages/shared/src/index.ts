@@ -38,6 +38,18 @@ export const ENEMIES = [
   { id: "bruja", name: "Bruja de los Apuntes", hp: 5, trait: "mudo" },
   { id: "troll", name: "Trol de Recuperatorio", hp: 8, trait: "blindado" },
   { id: "cuervo", name: "Cuervo de Tinta", hp: 4, trait: null },
+  { id: "bat", name: "Murciélago de Biblioteca", hp: 3, trait: "vampiro" },
+  { id: "snake", name: "Serpiente de Sintaxis", hp: 4, trait: "escurridizo" },
+  { id: "mushroom", name: "Hongo Alucinógeno", hp: 5, trait: "furioso" },
+  { id: "eye", name: "Ojo Supervisor", hp: 6, trait: "vampiro" },
+  { id: "owl", name: "Búho Vigía", hp: 4, trait: "mudo" },
+  { id: "beast", name: "Bestia del Final", hp: 9, trait: "blindado" },
+  { id: "reptile", name: "Reptil Escamoso", hp: 5, trait: "escurridizo" },
+  { id: "slime2", name: "Lodo Tóxico", hp: 4, trait: "furioso" },
+  { id: "mollusc", name: "Molusco Lento", hp: 6, trait: "blindado" },
+  { id: "lizard", name: "Lagarto Centinela", hp: 5, trait: "escurridizo" },
+  { id: "larva", name: "Larva Parásita", hp: 3, trait: "vampiro" },
+  { id: "mole", name: "Topo Subterráneo", hp: 4, trait: "mudo" },
 ] as const satisfies readonly { id: string; name: string; hp: number; trait: string | null }[];
 
 export type Role = (typeof GAME_CONFIG.roles)[number];
