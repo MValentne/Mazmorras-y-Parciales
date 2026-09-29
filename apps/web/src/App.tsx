@@ -175,7 +175,7 @@ export default function App() {
 
   if (!room) return <main className="page home home-pixel"><div className="home-layout">
     <section className="home-pitch"><div className="home-wordmark"><span className="brand-mark">M<span>&</span>P</span><span>JUEGO DE AVENTURA Y ESTUDIO</span></div>
-      <div className="dungeon-scene" aria-hidden="true"><div className="scene-wall"/><div className="scene-door"><span/><span/></div><span className="scene-torch torch-left"/><span className="scene-torch torch-right"/><span className="scene-floor"/><span className="scene-dragon"/><span className="scene-hero"/></div>
+      <div className="dungeon-scene" aria-hidden="true"><div className="scene-wall"/><div className="scene-door"><span/><span/></div><span className="scene-torch torch-left"/><span className="scene-torch torch-right"/><span className="scene-floor"/><span className="scene-flyer"/><span className="scene-hero"/></div>
       <p className="eyebrow">UNA CAMPAÑA COOPERATIVA</p><h1>Mazmorras<br/><span>y Parciales</span></h1><p className="intro">Reúnan al grupo, preparen sus personajes y conquisten la mazmorra pregunta a pregunta.</p>
       <div className="home-rules"><span><b>⚔</b> EQUIPO</span><span><b>◆</b> DADOS</span><span><b>▣</b> MAZO</span></div>
     </section>
