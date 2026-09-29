@@ -159,8 +159,14 @@ button:disabled { opacity: .55; cursor: wait; }
 .options { list-style: none; padding: 0; margin: 0; display: grid; gap: 9px; }
 .option { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; padding: 14px 15px; color: #eae1d0; background: #211e18; border: 1px solid #4c4436; border-radius: 8px; transition: border-color .15s, background .15s, transform .12s; }
 .option:hover:not(:disabled) { border-color: #c3a057; background: #2d2619; transform: translateX(2px); }
+.option:active:not(:disabled) { transform: translateY(2px) scale(.99); }
+.option:focus-visible { outline: 3px solid #e2bd69; outline-offset: 3px; }
 .option:disabled { cursor: default; opacity: .8; }
 .opt-index { display: grid; place-items: center; flex: 0 0 26px; height: 26px; border-radius: 6px; background: #39301e; border: 1px solid #66522e; color: #e3bd6a; font: 700 11px ui-monospace, monospace; }
+.option-selected-mark { display: inline-flex; align-items: center; gap: 5px; flex: 0 0 auto; margin-left: auto; padding: 6px 9px; border: 1px solid #72552c; border-radius: 999px; background: #9f7b43; color: #fff7df; box-shadow: 0 2px 0 #72552c; font: 800 11px/1 ui-monospace, monospace; }
+.option-selected-mark span { font-size: 9px; letter-spacing: .06em; }
+.option.selected { border-color: #7a5622; background: linear-gradient(#ffe8a6, #e3bd69); color: #38250d; box-shadow: 0 4px 0 #80602b, 0 0 0 3px #e9c97988, 0 0 22px #e6bb5b66; transform: translateY(-2px); }
+.option.selected .option-selected-mark { border-color: #684817; background: #6f4d19; color: #fff5d7; }
 .option.correct { border-color: #6f9a55; background: #25301d; opacity: 1; }
 .option.correct .opt-index { background: #3a5029; border-color: #7fb060; color: #cfe8b4; }
 .option.hit { box-shadow: inset 0 0 0 1px #cfe8b4; }
@@ -307,6 +313,8 @@ button:disabled { opacity: .55; cursor: wait; }
 .options { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .option { min-height: 59px; padding: 10px 12px; border: 2px solid #7f633b; border-radius: 10px; background: linear-gradient(#f0dfb7, #d6bd87); color: #3b2b1a; box-shadow: 0 4px 0 #80623a, 0 6px 10px #6b4c2530, inset 0 1px #fff; font-weight: 700; }
 .option:hover:not(:disabled) { transform: translateY(-2px); border-color: #543818; background: linear-gradient(#fff0c7, #e5ca8b); box-shadow: 0 6px 0 #80623a, 0 8px 14px #6b4c2540; }
+.option.selected { border-color: #56380d; background: linear-gradient(#ffedbb, #e9c56f); color: #35220c; box-shadow: 0 5px 0 #72511e, 0 0 0 3px #fff0c080, 0 8px 18px #5d421455; }
+.option.selected .option-selected-mark { border-color: #604111; background: #604111; color: #fff5d7; }
 .option:disabled { opacity: .88; }
 .opt-index { flex-basis: 30px; height: 30px; border: 2px solid #72552c; border-radius: 8px; background: #9f7b43; color: #fff2d4; box-shadow: inset 0 1px #fff5; }
 .option.correct { border-color: #436c30; background: linear-gradient(#d8efb9, #aed186); color: #25371d; box-shadow: 0 4px 0 #42612e, 0 0 18px #b5ef7e; }
@@ -317,6 +325,11 @@ button:disabled { opacity: .55; cursor: wait; }
 .reveal.good { border-color: #5e793e; background: #dfedc6; color: #314323; }
 .reveal.bad { border-color: #8c4335; background: #f0d0b5; color: #552921; }
 .reveal.timeup { border-color: #80633a; background: #f1dfb6; color: #57421f; }
+.vote-status { display: flex; align-items: center; justify-content: center; gap: 11px; margin: 14px 0 0; padding: 12px 14px; border: 2px solid #5e793e; border-radius: 10px; background: linear-gradient(#e8f3d5, #cfdfa9); color: #314323; box-shadow: 0 3px 0 #829a5d, inset 0 1px #fff; }
+.vote-status > span:first-child { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; background: #587c38; color: #f7ffea; font-size: 18px; font-weight: 900; box-shadow: 0 2px 0 #385622; }
+.vote-status > span:last-child { display: grid; gap: 3px; text-align: left; }
+.vote-status strong { font: 700 14px Georgia, serif; }
+.vote-status small { color: #4e603b; font-size: 11px; }
 @keyframes card-arrive { from { opacity: .3; transform: translateY(6px) scale(.97); } to { opacity: 1; transform: none; } }
 @keyframes timer-pulse { to { box-shadow: 0 0 14px #ed794c, inset 0 2px 4px #0008; } }
 @media (max-width: 860px) {

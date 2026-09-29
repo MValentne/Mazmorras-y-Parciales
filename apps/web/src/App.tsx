@@ -336,16 +336,18 @@ function GameBoard({ room, meId, reveal, myPick, now, abilityNotice, shopNotice,
         <p className="prompt">{game.current.prompt}</p>
         {preview
           ? <div className="preview-hint"><span aria-hidden="true">◷</span> Leé la pregunta. Las opciones aparecen en {Math.ceil(left / 1000)} segundos.</div>
-          : <ul className="options">{shown.map(i => {
+        : <ul className="options">{shown.map(i => {
           const isCorrect = reveal?.answer === i;
           const isMyWrong = reveal && myPick === i && !reveal.correct;
+          const isSelected = myPick === i && !reveal;
           return <li key={i}>
-            <button className={`option ${isCorrect ? "correct" : ""} ${isMyWrong ? "wrong" : ""} ${myPick === i && reveal?.correct ? "hit" : ""}`} disabled={closed || !canAct} onClick={() => onPick(i)}>
+            <button className={`option ${isSelected ? "selected" : ""} ${isCorrect ? "correct" : ""} ${isMyWrong ? "wrong" : ""} ${myPick === i && reveal?.correct ? "hit" : ""}`} aria-pressed={isSelected} disabled={closed || !canAct} onClick={() => onPick(i)}>
               {game.current!.options[i]}
+              {isSelected && <span className="option-selected-mark" aria-hidden="true">✓ <span>SELECCIONADA</span></span>}
             </button>
           </li>;
         })}</ul>}
-        {!closed && !preview && myPick !== null && <p className="preview-hint" role="status">Voto registrado en secreto · {game.votesReceived} de {room.players.filter(player => player.online && !player.eliminated).length} votaron.</p>}
+        {!closed && !preview && myPick !== null && <p className="vote-status" role="status"><span aria-hidden="true">✓</span><span><strong>Respuesta seleccionada</strong><small>Tu elección quedó registrada · {game.votesReceived} de {room.players.filter(player => player.online && !player.eliminated).length} votaron.</small></span></p>}
       </> : <p className="prompt waiting-prompt">Preparando la siguiente pregunta…</p>}
       {reveal && <div className={`reveal ${reveal.correct ? "good" : reveal.timeUp ? "timeup" : "bad"}`}>
         <strong>{reveal.timeUp ? "Se acabó el tiempo" : reveal.correct ? "Ronda resuelta" : "Fallaron"}</strong>
