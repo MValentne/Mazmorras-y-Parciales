@@ -32,13 +32,12 @@ const bloques = (lenguaje) => [...md.matchAll(new RegExp("```" + lenguaje + "\\n
 
 const carta = (extra = {}) => ({ prompt: "p", options: ["a", "b"], answer: 0, ...extra });
 
-test("todos los ejemplos JSON del documento los acepta el servidor", () => {
+test("el ejemplo JSON del documento lo acepta el servidor", () => {
   const ejemplos = bloques("json");
-  assert.ok(ejemplos.length >= 3, "el documento debería traer al menos 3 ejemplos JSON");
+  assert.ok(ejemplos.length >= 1, "el documento debería traer el ejemplo JSON narrativo");
   for (const [i, texto] of ejemplos.entries()) {
     const datos = JSON.parse(texto);
-    const cartas = datos.cards ?? datos;
-    const { error } = validateDeck(cartas);
+    const { error } = validateDeck(datos);
     assert.equal(error, null, `el ejemplo ${i + 1} del documento no pasa el validador: ${error}`);
   }
 });
@@ -56,7 +55,7 @@ test("el ejemplo CSV del documento lo acepta el parser y el servidor", () => {
 
 test("las reglas duras que promete el documento rechazan de verdad", () => {
   const reglas = [
-    [{ cards: [] }, /lista/i],
+    [{ cards: [] }, /vacío/i],
     [[], /vacío/i],
     [[{ options: ["a", "b"], answer: 0 }], /sin pregunta/i],
     [[carta({ options: ["a"] })], /entre 2 y 6/i],
@@ -68,7 +67,7 @@ test("las reglas duras que promete el documento rechazan de verdad", () => {
     [[carta({ answer: -1 })], /fuera de rango/i],
     [[carta({ answer: 2 })], /fuera de rango/i],
     [[carta({ answer: "uno" })], /fuera de rango/i],
-    [Array.from({ length: 601 }, () => carta()), /máximo es 600/i],
+    [Array.from({ length: 101 }, () => carta()), /máximo es 100/i],
   ];
   for (const [mazo, patron] of reglas) {
     const { error } = validateDeck(mazo);

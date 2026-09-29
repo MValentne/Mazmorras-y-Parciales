@@ -12,8 +12,10 @@ import {
   forfeitPlayer,
   handleAnswer,
   buyShopItem,
+  continueScene,
   continueFromShop,
   publicView,
+  reconcileSceneReady,
   startGame,
   useAbility,
   validateDeck,
@@ -115,6 +117,7 @@ io.on("connection", (socket: Socket<ClientEvents, ServerEvents>) => {
       updatedAt: Date.now(),
       sockets: new Map(),
       cards: [],
+      timeline: [],
       remaining: [],
       drawn: null,
       discardedFor: null,
@@ -203,20 +206,22 @@ io.on("connection", (socket: Socket<ClientEvents, ServerEvents>) => {
     if (!room.players.length) {
       clearTimers(room);
       rooms.delete(room.code);
-    } else publish(room);
+    } else if (room.status === "playing" && room.game?.currentScene) reconcileSceneReady(room, hooks);
+    else publish(room);
     socket.emit("room:left");
   });
 
-  socket.on("deck:upload", ({ title, cards }) => {
+  socket.on("deck:upload", ({ title, cards, scenes, depth }) => {
     const ctx = roomOf(socket);
     if (!ctx) return error(socket.id, "NOT_IN_ROOM", "No estás en una sala.");
     const { room, player } = ctx;
     if (room.creatorId !== player.id) return error(socket.id, "NOT_CREATOR", "Solo quien creó la sala puede cargar el mazo.");
     if (room.status !== "lobby") return error(socket.id, "GAME_STARTED", "No se puede cambiar el mazo con la partida en curso.");
-    const { cards: valid, error: invalid } = validateDeck(cards);
+    const { cards: valid, scenes: validScenes, timeline, depth: validDepth, error: invalid } = validateDeck(scenes ? { scenes, depth } : cards);
     if (invalid) return error(socket.id, "INVALID_DECK", invalid);
     room.cards = valid;
-    room.deck = { title: validateDeckTitle(title), size: valid.length };
+    room.timeline = timeline;
+    room.deck = { title: validateDeckTitle(title), size: valid.length, ...(validDepth ? { depth: validDepth } : {}), ...(validScenes.length ? { scenes: validScenes.length } : {}) };
     publish(room);
   });
 
@@ -236,6 +241,12 @@ io.on("connection", (socket: Socket<ClientEvents, ServerEvents>) => {
     const ctx = roomOf(socket);
     if (!ctx) return;
     handleAnswer(ctx.room, hooks, ctx.player, Number(answer));
+  });
+
+  socket.on("game:scene:continue", () => {
+    const ctx = roomOf(socket);
+    if (!ctx) return;
+    continueScene(ctx.room, hooks, ctx.player);
   });
 
   socket.on("game:ability", ({ ability }) => {
@@ -288,7 +299,8 @@ io.on("connection", (socket: Socket<ClientEvents, ServerEvents>) => {
         for (const p of room.players) p.isCreator = p.id === successor.id;
       }
     }
-    publish(room);
+    if (room.status === "playing" && room.game?.currentScene) reconcileSceneReady(room, hooks);
+    else publish(room);
   });
 });
 

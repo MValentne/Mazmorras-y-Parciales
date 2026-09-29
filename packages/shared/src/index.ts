@@ -13,10 +13,18 @@ export const GAME_CONFIG = {
   minOptions: 2,
   maxOptions: 6,
   mutedEnemyOptions: 3,
-  maxCards: 600,
+  maxCards: 100,
   maxPromptLength: 300,
   maxOptionLength: 160,
   maxTitleLength: 60,
+  maxScenes: 20,
+  maxSceneTitleLength: 70,
+  maxSceneSettingLength: 100,
+  maxSceneObjectiveLength: 180,
+  maxSceneBeatTitleLength: 70,
+  maxSceneBeatTextLength: 280,
+  sceneBeatCount: { min: 2, max: 4 },
+  mazeDepths: [40, 60, 80, 100],
 } as const;
 
 export const ENEMIES = [
@@ -56,6 +64,24 @@ export interface Card {
   explanation?: string;
 }
 
+export interface SceneBeat {
+  heading: string;
+  text: string;
+}
+
+export interface DeckScene {
+  id: string;
+  title: string;
+  setting: string;
+  objective: string;
+  beats: SceneBeat[];
+}
+
+/** Escena de carga: trae las preguntas narradas por esa sección. */
+export interface DeckSceneInput extends Omit<DeckScene, "id"> {
+  cards: Omit<Card, "id">[];
+}
+
 /** Lo que se manda al cliente mientras la pregunta está en juego: nunca incluye la respuesta ni la explicación. */
 export interface PublicCard {
   id: string;
@@ -92,6 +118,8 @@ export interface RoomSettings {
 export interface DeckInfo {
   title: string;
   size: number;
+  depth?: number;
+  scenes?: number;
 }
 
 export interface GameState {
@@ -100,6 +128,10 @@ export interface GameState {
   enemiesDefeated: number;
   enemy: Enemy | null;
   current: PublicCard | null;
+  currentScene: DeckScene | null;
+  sceneReady: string[];
+  scenesCompleted: number;
+  sceneCount: number;
   answerStartsAt: number;
   deadline: number;
   visibleOptions: number[] | null;
@@ -146,10 +178,11 @@ export type ClientEvents = {
   "room:leave": () => void;
   "player:role": (payload: { role: Role }) => void;
   /** Sin id: el servidor valida el mazo y le asigna los identificadores. */
-  "deck:upload": (payload: { title: string; cards: Omit<Card, "id">[] }) => void;
+  "deck:upload": (payload: { title: string; cards?: Omit<Card, "id">[]; scenes?: DeckSceneInput[]; depth?: number }) => void;
   /** Sin playerId: el servidor lo toma de la sesión del socket, no del payload. */
   "game:start": () => void;
   "game:answer": (payload: { answer: number }) => void;
+  "game:scene:continue": () => void;
   "game:forfeit": () => void;
   "game:ability": (payload: { ability: Ability }) => void;
   "game:shop:buy": (payload: { item: "healing" | "revive" | "phoenix" | "ward" | "partyHeal" | "bomb" | "focus"; targetId?: string }) => void;

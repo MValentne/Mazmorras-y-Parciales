@@ -6,6 +6,7 @@ import {
   ROLE_ABILITIES,
   type Ability,
   type Card,
+  type DeckScene,
   type Outcome,
   type Player,
   type Reveal,
@@ -14,12 +15,14 @@ import {
 } from "@dungeon/shared";
 
 export type Timers = { deadline?: NodeJS.Timeout; advance?: NodeJS.Timeout };
+export type DeckEntry = { type: "question"; card: Card } | { type: "scene"; scene: DeckScene };
 
 /** Estado real de la sala. Los campos fuera de RoomState NUNCA se transmiten: ver publicView(). */
 export type GameRoom = RoomState & {
   sockets: Map<string, string>;
   cards: Card[];
-  remaining: Card[];
+  timeline: DeckEntry[];
+  remaining: DeckEntry[];
   drawn: Card | null;
   discardedFor: string | null;
   wrongPlayers: Set<string>;
@@ -42,42 +45,108 @@ export function validateDeckTitle(raw: unknown) {
   return title || "Mazo sin título";
 }
 
-export function validateDeck(raw: unknown): { cards: Card[]; error: string | null } {
-  if (!Array.isArray(raw)) return { cards: [], error: "El mazo tiene que ser una lista de preguntas." };
-  if (raw.length === 0) return { cards: [], error: "El mazo está vacío: subí al menos una pregunta." };
-  if (raw.length > GAME_CONFIG.maxCards)
-    return { cards: [], error: `El mazo tiene ${raw.length} cartas y el máximo es ${GAME_CONFIG.maxCards}.` };
-
+export function validateDeck(raw: unknown): { cards: Card[]; scenes: DeckScene[]; timeline: DeckEntry[]; depth: number | null; error: string | null } {
+  const source = raw && typeof raw === "object" && !Array.isArray(raw) ? raw as Record<string, unknown> : null;
+  const rawScenes = source?.scenes;
+  const hasScenes = Array.isArray(rawScenes);
+  const rawCards = Array.isArray(raw) ? raw : source?.cards ?? source?.questions ?? source?.preguntas;
   const cards: Card[] = [];
-  for (const [index, item] of raw.entries()) {
-    const n = index + 1;
-    if (!item || typeof item !== "object") return { cards: [], error: `La carta ${n} no es una pregunta válida.` };
-    const row = item as Record<string, unknown>;
-    const prompt = clean(row.prompt, GAME_CONFIG.maxPromptLength);
-    if (!prompt) return { cards: [], error: `La carta ${n} está sin pregunta.` };
+  const scenes: DeckScene[] = [];
+  const timeline: DeckEntry[] = [];
+  let error: string | null = null;
 
-    const options = Array.isArray(row.options) ? row.options.map((o) => clean(o, GAME_CONFIG.maxOptionLength)) : [];
-    if (options.length < GAME_CONFIG.minOptions || options.length > GAME_CONFIG.maxOptions)
-      return { cards: [], error: `La carta ${n} tiene ${options.length} opciones y se permiten entre ${GAME_CONFIG.minOptions} y ${GAME_CONFIG.maxOptions}.` };
-    if (new Set(options).size !== options.length) return { cards: [], error: `La carta ${n} repite opciones.` };
-    if (options.some((o) => !o)) return { cards: [], error: `La carta ${n} tiene una opción vacía.` };
+  if (source?.scenes !== undefined && !hasScenes)
+    return { cards, scenes, timeline, depth: null, error: "El campo scenes tiene que ser una lista de escenas." };
 
-    const answer = Number(row.answer);
-    if (!Number.isInteger(answer) || answer < 0 || answer >= options.length)
-      return { cards: [], error: `La carta ${n} tiene respuesta "${String(row.answer)}" fuera de rango (va de 0 a ${options.length - 1}).` };
+  const readCards = (list: unknown, sceneIndex?: number) => {
+    if (!Array.isArray(list)) {
+      error = sceneIndex === undefined ? "El mazo tiene que ser una lista de preguntas." : `La escena ${sceneIndex + 1} necesita una lista de preguntas.`;
+      return [] as Card[];
+    }
+    const valid: Card[] = [];
+    for (const item of list) {
+      const index = cards.length + valid.length;
+      const n = index + 1;
+      if (!item || typeof item !== "object") { error = `La carta ${n} no es una pregunta válida.`; return []; }
+      const row = item as Record<string, unknown>;
+      const prompt = clean(row.prompt, GAME_CONFIG.maxPromptLength);
+      if (!prompt) { error = `La carta ${n} está sin pregunta.`; return []; }
+      const options = Array.isArray(row.options) ? row.options.map((o) => clean(o, GAME_CONFIG.maxOptionLength)) : [];
+      if (options.length < GAME_CONFIG.minOptions || options.length > GAME_CONFIG.maxOptions) {
+        error = `La carta ${n} tiene ${options.length} opciones y se permiten entre ${GAME_CONFIG.minOptions} y ${GAME_CONFIG.maxOptions}.`;
+        return [];
+      }
+      if (new Set(options).size !== options.length) { error = `La carta ${n} repite opciones.`; return []; }
+      if (options.some((o) => !o)) { error = `La carta ${n} tiene una opción vacía.`; return []; }
+      const answer = Number(row.answer);
+      if (!Number.isInteger(answer) || answer < 0 || answer >= options.length) {
+        error = `La carta ${n} tiene respuesta "${String(row.answer)}" fuera de rango (va de 0 a ${options.length - 1}).`;
+        return [];
+      }
+      const explanation = clean(row.explanation, 400);
+      valid.push({ id: `c${index}`, prompt, options, answer, ...(explanation ? { explanation } : {}) });
+    }
+    return valid;
+  };
 
-    const explanation = clean(row.explanation, 400);
-    cards.push({ id: `c${index}`, prompt, options, answer, ...(explanation ? { explanation } : {}) });
+  if (hasScenes) {
+    if (!rawScenes.length) return { cards, scenes, timeline, depth: null, error: "El mazo necesita al menos una escena." };
+    if (rawScenes.length > GAME_CONFIG.maxScenes)
+      return { cards, scenes, timeline, depth: null, error: `El mazo supera el máximo de ${GAME_CONFIG.maxScenes} escenas.` };
+    for (const [index, rawScene] of rawScenes.entries()) {
+      if (!rawScene || typeof rawScene !== "object") { error = `La escena ${index + 1} no es válida.`; break; }
+      const row = rawScene as Record<string, unknown>;
+      const title = clean(row.title, GAME_CONFIG.maxSceneTitleLength);
+      const setting = clean(row.setting, GAME_CONFIG.maxSceneSettingLength);
+      const objective = clean(row.objective, GAME_CONFIG.maxSceneObjectiveLength);
+      if (!title || !setting || !objective) { error = `La escena ${index + 1} necesita título, lugar y objetivo.`; break; }
+      if (!Array.isArray(row.beats) || row.beats.length < GAME_CONFIG.sceneBeatCount.min || row.beats.length > GAME_CONFIG.sceneBeatCount.max) {
+        error = `La escena ${index + 1} necesita entre ${GAME_CONFIG.sceneBeatCount.min} y ${GAME_CONFIG.sceneBeatCount.max} momentos narrativos.`;
+        break;
+      }
+      const beats = row.beats.map((rawBeat) => {
+        if (!rawBeat || typeof rawBeat !== "object") return { heading: "", text: "" };
+        const beat = rawBeat as Record<string, unknown>;
+        return { heading: clean(beat.heading, GAME_CONFIG.maxSceneBeatTitleLength), text: clean(beat.text, GAME_CONFIG.maxSceneBeatTextLength) };
+      });
+      if (beats.some((beat) => !beat.heading || !beat.text)) { error = `La escena ${index + 1} tiene un momento sin título o texto.`; break; }
+      if (!Array.isArray(row.cards) || !row.cards.length) { error = `La escena ${index + 1} necesita al menos una pregunta.`; break; }
+      const scene: DeckScene = { id: `s${index}`, title, setting, objective, beats };
+      const sceneCards = readCards(row.cards, index);
+      if (error) break;
+      scenes.push(scene);
+      timeline.push({ type: "scene", scene });
+      cards.push(...sceneCards);
+      timeline.push(...sceneCards.map((card): DeckEntry => ({ type: "question", card })));
+    }
+  } else {
+    if (!Array.isArray(rawCards)) return { cards, scenes, timeline, depth: null, error: "El mazo tiene que incluir una lista de preguntas o escenas." };
+    const valid = readCards(rawCards);
+    if (!error) {
+      cards.push(...valid);
+      timeline.push(...valid.map((card): DeckEntry => ({ type: "question", card })));
+    }
   }
-  return { cards, error: null };
+  if (error) return { cards: [], scenes: [], timeline: [], depth: null, error };
+  if (!cards.length) return { cards: [], scenes: [], timeline: [], depth: null, error: "El mazo está vacío: subí al menos una pregunta." };
+  if (cards.length > GAME_CONFIG.maxCards)
+    return { cards: [], scenes: [], timeline: [], depth: null, error: `El mazo tiene ${cards.length} cartas y el máximo es ${GAME_CONFIG.maxCards}.` };
+
+  const rawDepth = source?.depth;
+  const depth = rawDepth === undefined ? null : Number(rawDepth);
+  if (depth !== null && !GAME_CONFIG.mazeDepths.some((allowed) => allowed === depth))
+    return { cards: [], scenes: [], timeline: [], depth: null, error: `La profundidad debe ser una de estas cantidades de preguntas: ${GAME_CONFIG.mazeDepths.join(", ")}.` };
+  if (depth !== null && depth !== cards.length)
+    return { cards: [], scenes: [], timeline: [], depth: null, error: `La profundidad elegida es ${depth}, pero el mazo tiene ${cards.length} preguntas.` };
+  return { cards, scenes, timeline, depth, error: null };
 }
 
 export function publicView(room: GameRoom): RoomState {
-  const { sockets: _s, cards: _c, remaining: _r, drawn: _d, discardedFor: _dd, timers: _t, ...state } = room;
+  const { sockets: _s, cards: _c, timeline: _tl, remaining: _r, drawn: _d, discardedFor: _dd, timers: _t, ...state } = room;
   return {
     ...state,
     players: state.players.map((p) => ({ ...p })),
-    game: state.game ? { ...state.game, current: state.game.current ? { ...state.game.current } : null } : null,
+    game: state.game ? { ...state.game, current: state.game.current ? { ...state.game.current } : null, currentScene: state.game.currentScene ? { ...state.game.currentScene, beats: state.game.currentScene.beats.map((beat) => ({ ...beat })) } : null, sceneReady: [...state.game.sceneReady] } : null,
   };
 }
 
@@ -96,6 +165,7 @@ export function clearTimers(room: GameRoom) {
 }
 
 const alive = (room: GameRoom) => room.players.filter((p) => !p.eliminated);
+const onlinePlayers = (room: GameRoom) => room.players.filter((p) => p.online);
 
 /**
  * Cierra la partida si corresponde. Si el equipo cae entero, pausa el combate en
@@ -115,9 +185,12 @@ function settle(room: GameRoom, hooks: EngineHooks) {
       }
       if (!g.shopOpen) {
         clearTimers(room);
-        if (room.drawn && !room.remaining.some((card) => card.id === room.drawn?.id)) room.remaining.push(room.drawn);
+        if (g.currentScene) room.remaining.push({ type: "scene", scene: g.currentScene });
+        if (room.drawn && !room.remaining.some((entry) => entry.type === "question" && entry.card.id === room.drawn?.id)) room.remaining.push({ type: "question", card: room.drawn });
         room.drawn = null;
         g.current = null;
+        g.currentScene = null;
+        g.sceneReady = [];
         g.shopOpen = true;
         g.deadline = 0;
         g.answerStartsAt = 0;
@@ -253,6 +326,7 @@ function finish(room: GameRoom, hooks: EngineHooks, outcome: Outcome) {
     g.finishedAt = Date.now();
   }
   clearQuestion(room);
+  if (g) g.currentScene = null;
   room.remaining = [];
   room.status = "results";
   hooks.onState(room);
@@ -288,8 +362,22 @@ function dealCard(room: GameRoom, hooks: EngineHooks) {
   const g = room.game;
   if (!g) return;
   if (!room.remaining.length) return finish(room, hooks, "won");
-  const card = room.remaining.pop() ?? null;
-  if (!card) return finish(room, hooks, "won");
+  const entry = room.remaining.pop();
+  if (!entry) return finish(room, hooks, "won");
+  if (entry.type === "scene") {
+    room.drawn = null;
+    g.current = null;
+    g.currentScene = entry.scene;
+    g.sceneReady = [];
+    g.answerStartsAt = 0;
+    g.deadline = 0;
+    g.visibleOptions = null;
+    hooks.onState(room);
+    return;
+  }
+  const card = entry.card;
+  g.currentScene = null;
+  g.sceneReady = [];
   g.turnNumber += 1;
   for (const [playerId, active] of Object.entries(g.usedAbilities)) {
     g.usedAbilities[playerId] = active.filter((ability) => !["discard", "heal", "extend", "track", "potion"].includes(ability));
@@ -318,7 +406,7 @@ function onTimeout(room: GameRoom, hooks: EngineHooks) {
     }
   }
 
-  room.remaining.push(card);
+  room.remaining.push({ type: "question", card });
   const reveal: Reveal = {
     correct: false,
     answer: card.answer,
@@ -340,8 +428,19 @@ function onTimeout(room: GameRoom, hooks: EngineHooks) {
 export function startGame(room: GameRoom, hooks: EngineHooks) {  if (room.status !== "lobby" || !room.cards.length) return;
   clearTimers(room);
   room.wrongPlayers ??= new Set();
+  room.timeline ??= room.cards.map((card): DeckEntry => ({ type: "question", card }));
   const limit = room.settings.cardCount > 0 ? Math.min(room.settings.cardCount, room.cards.length) : room.cards.length;
-  room.remaining = shuffle(room.cards.slice(0, limit));
+  const selected: DeckEntry[] = [];
+  let selectedCards = 0;
+  for (const entry of room.timeline) {
+    if (entry.type === "scene") {
+      if (selectedCards < limit) selected.push(entry);
+    } else if (selectedCards < limit) {
+      selected.push(entry);
+      selectedCards += 1;
+    }
+  }
+  room.remaining = selected.reverse();
   room.drawn = null;
   room.discardedFor = null;
   for (const p of room.players) {
@@ -352,11 +451,15 @@ export function startGame(room: GameRoom, hooks: EngineHooks) {  if (room.status
   }
   room.status = "playing";
   room.game = {
-    pending: room.remaining.length,
+    pending: selectedCards,
     mastered: 0,
     enemiesDefeated: 0,
     enemy: null,
     current: null,
+    currentScene: null,
+    sceneReady: [],
+    scenesCompleted: 0,
+    sceneCount: selected.filter((entry) => entry.type === "scene").length,
     answerStartsAt: 0,
     deadline: 0,
     visibleOptions: null,
@@ -373,6 +476,31 @@ export function startGame(room: GameRoom, hooks: EngineHooks) {  if (room.status
   };
   spawnEnemy(room);
   dealCard(room, hooks);
+}
+
+function advanceFromSceneIfReady(room: GameRoom, hooks: EngineHooks) {
+  const g = room.game;
+  if (!g?.currentScene) return false;
+  const required = onlinePlayers(room);
+  if (!required.length || !required.every((player) => g.sceneReady.includes(player.id))) return false;
+  g.currentScene = null;
+  g.sceneReady = [];
+  g.scenesCompleted += 1;
+  dealCard(room, hooks);
+  return true;
+}
+
+/** Registra la confirmación del jugador y avanza cuando ya confirmó todo el equipo conectado. */
+export function continueScene(room: GameRoom, hooks: EngineHooks, player: Player) {
+  const g = room.game;
+  if (!g?.currentScene || room.status !== "playing") return;
+  if (!g.sceneReady.includes(player.id)) g.sceneReady.push(player.id);
+  if (!advanceFromSceneIfReady(room, hooks)) hooks.onState(room);
+}
+
+/** Evita que la desconexión de alguien deje la escena esperando una confirmación imposible. */
+export function reconcileSceneReady(room: GameRoom, hooks: EngineHooks) {
+  if (!advanceFromSceneIfReady(room, hooks)) hooks.onState(room);
 }
 
 export function handleAnswer(room: GameRoom, hooks: EngineHooks, player: Player, answer: number) {

@@ -1,10 +1,10 @@
-import type { Card } from "@dungeon/shared";
+import type { Card, DeckSceneInput } from "@dungeon/shared";
 
 /** Lo que produce el parser: el id lo asigna el servidor al validar. */
 export type DeckCard = Omit<Card, "id">;
 type DeckError = { title: string; cards: []; error: string };
-type Draft = { title: string; cards: DeckCard[] } | DeckError;
-export type DeckResult = { title: string; cards: DeckCard[]; error: null } | DeckError;
+type Draft = { title: string; cards: DeckCard[]; scenes?: DeckSceneInput[]; depth?: number } | DeckError;
+export type DeckResult = { title: string; cards: DeckCard[]; scenes?: DeckSceneInput[]; depth?: number; error: null } | DeckError;
 
 const fail = (error: string): DeckError => ({ title: "", cards: [], error });
 
@@ -74,11 +74,18 @@ function cardsFromJson(text: string, fallbackTitle: string): Draft {
 
   const record = data && typeof data === "object" ? (data as Record<string, unknown>) : null;
   const list = Array.isArray(data) ? data : record?.cards ?? record?.questions ?? record?.preguntas;
-  if (!Array.isArray(list)) return fail("El JSON tiene que ser una lista de preguntas o un objeto con una lista en \"cards\".");
-  if (!list.length) return fail("El JSON no tiene ninguna pregunta.");
+  const scenes = Array.isArray(record?.scenes) ? record.scenes as DeckSceneInput[] : undefined;
+  if (!Array.isArray(list) && !scenes) return fail("El JSON tiene que incluir preguntas o una lista de escenas.");
+  const sceneCards = (scenes ?? []).flatMap(scene => {
+      const row = scene && typeof scene === "object" ? scene as DeckSceneInput : null;
+      return Array.isArray(row?.cards) ? row.cards : [];
+    });
+  const cards = scenes ? sceneCards : Array.isArray(list) ? list as DeckCard[] : [];
+  if (!cards.length) return fail("El JSON no tiene ninguna pregunta.");
 
   const title = record?.title ? String(record.title) : fallbackTitle;
-  return { title: title.trim(), cards: list as DeckCard[] };
+  const depth = record?.depth === undefined ? undefined : Number(record.depth);
+  return { title: title.trim(), cards, ...(scenes ? { scenes } : {}), ...(depth !== undefined ? { depth } : {}) };
 }
 
 export function parseDeckText(text: string, fileName: string): DeckResult {
@@ -86,7 +93,7 @@ export function parseDeckText(text: string, fileName: string): DeckResult {
   const draft = /\.json$/i.test(fileName) ? cardsFromJson(text, fallbackTitle) : cardsFromCsv(text, fallbackTitle);
   if ("error" in draft) return draft;
   if (!draft.cards.length) return fail("El archivo no tiene preguntas.");
-  return { title: draft.title, cards: draft.cards, error: null };
+  return { title: draft.title, cards: draft.cards, ...(draft.scenes ? { scenes: draft.scenes } : {}), ...(draft.depth !== undefined ? { depth: draft.depth } : {}), error: null };
 }
 
 export async function parseDeckFile(file: File): Promise<DeckResult> {
