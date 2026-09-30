@@ -1,6 +1,44 @@
-# Dungeon de Estudio
+# Mazmorras y Parciales
 
 MVP cooperativo para estudiar en salas temporales. El servidor es la fuente de verdad; están implementados el lobby, las invitaciones, el QR, los roles, las reconexiones, la transferencia del creador y la fase de combate completa con carga de mazos.
+
+## Flujo de la aventura
+
+Las preguntas tienen 10 segundos de lectura y 25 para votar. La selección propia
+queda azul y el reloj siempre llega al final. Después aparecen los errores en rojo
+y la correcta en verde, junto con la explicación. El resultado permanece en pantalla
+hasta que todos los conectados (también los caídos) confirmen **Continuar**.
+Una desconexión no bloquea esa confirmación y reconectarse recupera el voto propio
+y el resultado actual.
+
+La mochila empieza con una poción y permite usar objetos durante preguntas,
+resultados, escenas y encuentros. Comprar guarda los objetos; un intento sin efecto
+no los consume. Los poderes se pueden activar incluso después de votar, mientras
+el reloj siga corriendo, y muestran una animación compartida con el personaje que
+los lanzó. Los efectos preparados persisten hasta activarse.
+
+Cada dos preguntas aparece un encuentro: tienda, fogata, tienda, tesoro, tienda,
+santuario. Las fogatas curan o recargan habilidades; los tesoros ofrecen monedas o
+una bomba; los santuarios dan un escudo o una recarga. Cada jugador elige una vez.
+Las ventanas de encuentro pausan el combate y esperan a todo el grupo para cerrarse.
+El primer equipo caído tiene un rescate; la siguiente caída termina la partida.
+
+El recorrido se gana al completar las preguntas con alguien en pie. El tablero y
+la crónica final distinguen progreso, aciertos propios y aciertos del equipo.
+
+## Verificación
+
+- `npm ci` instala las dependencias.
+- `npm test` compila shared y server y ejecuta las pruebas unitarias.
+- `npm run build` compila los tres paquetes y verifica TypeScript.
+- `npm run test:e2e` requiere ese build: prueba dos clientes reales por WebSocket,
+  derrota, rescate, reconexión, compras, continuación colectiva y todos los eventos.
+  Su proceso de servidor usa relojes breves desde `test/fast-config.mjs`; los tiempos
+  de producción no cambian.
+- `npx playwright install chromium` prepara el navegador y `npm run test:ui` prueba
+  selección, colores, habilidades, mochila, encuentros y victoria en escritorio y
+  móvil. También admite `CHROMIUM_PATH=/ruta/a/chromium`. Guarda capturas en
+  `test-results/ui/` (ignorado por Git) y requiere `npm run build` previo.
 
 ## Mazos de tarjetas
 

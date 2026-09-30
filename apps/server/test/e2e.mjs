@@ -8,6 +8,7 @@
  */
 import assert from "node:assert/strict";
 import { io } from "socket.io-client";
+import { getContinuePhase } from "@dungeon/shared";
 
 const BASE = process.env.BASE ?? "http://127.0.0.1:3001";
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -27,9 +28,11 @@ const deckWith = (answer) => Array.from({ length: 4 }, (_, i) => ({
 
 function client(playerId, nickname) {
   const socket = io(BASE, { transports: ["websocket"] });
-  const state = { socket, playerId, nickname, room: null, reveals: [], errors: [] };
+  const state = { socket, playerId, nickname, room: null, reveals: [], errors: [], abilities: [], votes: [] };
   socket.on("room:state", (r) => { state.room = r; });
   socket.on("game:reveal", (r) => state.reveals.push(r));
+  socket.on("game:ability", (effect) => state.abilities.push(effect));
+  socket.on("game:vote", (vote) => state.votes.push(vote));
   socket.on("room:error", (e) => state.errors.push(e));
   return state;
 }
@@ -105,7 +108,7 @@ try {
 
   await until("aparecen las opciones", () => Date.now() >= a.room.game.answerStartsAt);
 
-  a.socket.emit("game:answer", { answer: 7 });
+  a.socket.emit("game:answer", { answer: 7, cardId: a.room.game.current.id });
   await wait(120);
   check("una respuesta fuera de rango se ignora", () => assert.equal(ana().hp, 3));
 
@@ -113,25 +116,37 @@ try {
   await wait(120);
   check("el rol no se puede cambiar con la partida en curso", () => assert.equal(beto().role, "Guerrero"));
 
-  // El mazo de esta partida tiene la correcta en el índice 1, así que contestar 0
-  // falla siempre. Nadie sana: el equipo no activa el poder del Clérigo.
-  for (let i = 0; i < 3; i++) {
-    const hp = beto().hp;
-    b.socket.emit("game:answer", { answer: 0 });
-    await until(`fallo ${i + 1} de Beto`, () => beto().hp < hp, 8);
+  // Cada pregunta se resuelve al vencer el reloj y espera las dos confirmaciones.
+  let rescued = false;
+  while (a.room.status === "playing") {
+    if (a.room.game.shopOpen && !a.room.players.some(p => !p.eliminated)) {
+      check("la primera caída abre el rescate", () => assert.equal(rescued, false));
+      a.socket.emit("game:shop:buy", { item: "revive" });
+      await until("vial en mochila", () => ana().inventory.revive === 1);
+      a.socket.emit("game:item:use", { item: "revive", targetId: "pa" });
+      await until("Ana revive", () => ana().hp === 1);
+      rescued = true;
+    }
+    if (a.room.game.encounter || a.room.game.reveal) {
+      await wait(120);
+      const turn = a.room.game.turnNumber;
+      const phase = a.room.game.encounter;
+      a.socket.emit("game:continue", { phase: getContinuePhase(a.room.game) });
+      await wait(80);
+      check("un solo continuar no cambia la fase", () => {
+        assert.equal(a.room.game.turnNumber, turn);
+        assert.equal(a.room.game.encounter, phase);
+      });
+      b.socket.emit("game:continue", { phase: getContinuePhase(a.room.game) });
+      await until("avanza la fase", () => a.room.status === "results" || a.room.game.turnNumber !== turn || a.room.game.encounter !== phase);
+    } else if (a.room.game.answerStartsAt <= Date.now()) {
+      const turn = a.room.game.turnNumber;
+      if (!ana().eliminated) a.socket.emit("game:answer", { answer: 0, cardId: a.room.game.current.id });
+      if (!beto().eliminated) b.socket.emit("game:answer", { answer: 0, cardId: a.room.game.current.id });
+      await until("resultado de fallo", () => !!a.room.game.reveal || a.room.game.turnNumber !== turn);
+    } else await wait(30);
   }
-  check("tres fallos dejan al jugador en cero de vida", () => {
-    assert.equal(beto().hp, 0);
-    assert.equal(beto().eliminated, true);
-  });
-
-  for (let i = 0; i < 3; i++) {
-    const hp = ana().hp;
-    a.socket.emit("game:answer", { answer: 0 });
-    await until(`fallo ${i + 1} de Ana`, () => ana().hp < hp, 8);
-  }
-  await until("fin por derrota", () => a.room.status === "results");
-  check("el equipo entero caído pierde la partida", () => assert.equal(a.room.game.outcome, "lost"));
+  check("un segundo equipo caído pierde después de leer el resultado", () => assert.equal(a.room.game.outcome, "lost"));
   check("el cliente recibe los reveals de fallo", () => assert.equal(a.reveals.some((r) => !r.correct), true));
 
   b.socket.emit("game:lobby");
@@ -146,7 +161,7 @@ try {
   });
 
   /* ---------- partida 2: victoria ---------- */
-  a.socket.emit("deck:upload", { title: "Mazo fácil", cards: deckWith(0) });
+  a.socket.emit("deck:upload", { title: "Mazo fácil", cards: Array.from({ length: 13 }, (_, i) => ({ ...deckWith(0)[0], prompt: `Pregunta ${i}` })) });
   await until("mazo nuevo", () => a.room.deck?.title === "Mazo fácil");
   a.socket.emit("game:start");
   await until("segunda partida", () => a.room.status === "playing");
@@ -155,18 +170,66 @@ try {
     assert.equal(a.room.game.current !== null, true);
   });
 
-  // El mazo tiene la correcta en el índice 0, así que Ana acierta siempre. Entre
-  // carta y carta hay una pausa de reveal de varios segundos, de ahí el margen.
-  const playUntil = Date.now() + 90000;
-  while (a.room.status === "playing" && Date.now() < playUntil) {
-    if (a.room.game.answerStartsAt <= Date.now() && a.room.game.deadline > Date.now()) a.socket.emit("game:answer", { answer: 0 });
-    await wait(150);
-  }
-  await until("fin por victoria", () => a.room.status === "results", 200);
-  check("dominar todo el mazo gana, aunque al enemigo le sobre vida", () => {
-    assert.equal(a.room.game.outcome, "won");
-    assert.equal(a.room.game.mastered, 4);
+  await until("poder habilitado", () => a.room.game.answerStartsAt <= Date.now());
+  b.socket.emit("game:ability", { ability: "strike" });
+  await until("poder compartido", () => a.abilities.length > 0 && b.abilities.length > 0);
+  check("ambos clientes ven quién activa la habilidad", () => {
+    assert.equal(a.abilities.at(-1).playerId, "pb");
+    assert.deepEqual(a.abilities.at(-1), b.abilities.at(-1));
   });
+
+  const seenEvents = [];
+  let reconnected = false;
+  let bought = false;
+  const playUntil = Date.now() + 40000;
+  while (a.room.status === "playing" && Date.now() < playUntil) {
+    const game = a.room.game;
+    if (game.reveal) {
+      if (!reconnected) {
+        b.socket.disconnect();
+        await until("Beto desconectado", () => !beto().online);
+        b.socket.connect();
+        await once(b.socket, "connect");
+        b.socket.emit("room:reconnect", { code, playerId: "pb" });
+        await once(b.socket, "room:joined");
+        check("reconectar recupera el resultado y el voto propio", () => {
+          assert.deepEqual(b.room.game.reveal, game.reveal);
+          assert.equal(b.votes.at(-1).answer, 0);
+        });
+        reconnected = true;
+      }
+      await wait(120);
+      a.socket.emit("game:continue", { phase: getContinuePhase(a.room.game) }); b.socket.emit("game:continue", { phase: getContinuePhase(a.room.game) });
+      await until("sale del resultado", () => !a.room.game.reveal || a.room.status === "results");
+    } else if (game.encounter) {
+      seenEvents.push(game.encounter);
+      if (game.encounter === "shop" && !bought) {
+        const stock = ana().inventory.healing;
+        a.socket.emit("game:shop:buy", { item: "healing" });
+        await until("compra guardada", () => ana().inventory.healing === stock + 1);
+        check("comprar no consume la poción con vida llena", () => assert.equal(ana().hp, 3));
+        bought = true;
+      } else if (game.encounter !== "shop") {
+        const choice = game.encounter === "campfire" ? "focus" : "item";
+        a.socket.emit("game:event:claim", { choice }); b.socket.emit("game:event:claim", { choice });
+        await until("premios del evento", () => a.room.game.encounterClaimed.length === 2);
+      }
+      a.socket.emit("game:continue", { phase: getContinuePhase(a.room.game) }); b.socket.emit("game:continue", { phase: getContinuePhase(a.room.game) });
+      await until("sale del encuentro", () => !a.room.game.encounter);
+    } else if (game.answerStartsAt <= Date.now() && game.deadline > Date.now()) {
+      a.socket.emit("game:answer", { answer: 0, cardId: a.room.game.current.id }); b.socket.emit("game:answer", { answer: 0, cardId: a.room.game.current.id });
+      await until("resultado correcto", () => !!a.room.game.reveal);
+    } else await wait(30);
+  }
+  await until("fin por victoria", () => a.room.status === "results");
+  check("el contador separa preguntas y aciertos individuales", () => {
+    assert.equal(a.room.game.outcome, "won");
+    assert.equal(a.room.game.mastered, 13);
+    assert.equal(a.room.game.correctAnswers, 26);
+    assert.equal(ana().correctAnswers, 13);
+    assert.equal(a.room.game.pending, 0);
+  });
+  check("se recorren tiendas y tres nuevos eventos", () => assert.deepEqual(seenEvents, ["shop", "campfire", "shop", "treasure", "shop", "shrine"]));
   check("el reveal trae la explicación cuando la carta la tiene", () =>
     assert.equal(a.reveals.some((r) => r.explanation === "La explicación."), true));
 } catch (e) {

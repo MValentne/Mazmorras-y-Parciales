@@ -1,14 +1,15 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import QRCode from "qrcode";
 import { io, type Socket } from "socket.io-client";
 import {
   GAME_CONFIG,
   getShopPrices,
+  getContinuePhase,
   ABILITY_COOLDOWNS,
   type Ability,
   type ClientEvents,
   type DeckScene,
-  type Reveal,
+  type ShopItem,
   type Role,
   type RoomState,
   type ServerEvents,
@@ -16,9 +17,18 @@ import {
 import { parseDeckFile } from "./deck";
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL || window.location.origin;
+// getRandomValues también funciona al abrir la partida por HTTP en la red local.
+const createPlayerId = () => {
+  if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 15) | 64;
+  bytes[8] = (bytes[8] & 63) | 128;
+  const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+};
 const getPlayerId = () => {
   let id = localStorage.getItem("dungeon-player-id");
-  if (!id) { id = crypto.randomUUID(); localStorage.setItem("dungeon-player-id", id); }
+  if (!id) { id = createPlayerId(); localStorage.setItem("dungeon-player-id", id); }
   return id;
 };
 const roleInfo: Record<Role, string> = {
@@ -49,7 +59,7 @@ const roleSpriteAsset: Record<Role, string> = {
 const playerSpriteUrl = (role: Role | null) => `/sprites/characters/${role ? roleSpriteAsset[role] : "unknown"}.png`;
 const TRAIT_INFO: Record<string, string> = {
   mudo: "Mudo · muestra menos opciones",
-  blindado: "Blindado · ignora el daño doble",
+  blindado: "Blindado · reduce el golpe del Guerrero",
   furioso: "Furioso · hace el doble de daño al fallar",
   vampiro: "Vampiro · se cura 1 PV si alguien falla",
   escurridizo: "Escurridizo · esquiva 1 punto de daño recibido",
@@ -65,14 +75,15 @@ export default function App() {
   const [error, setError] = useState("");
   const [joining, setJoining] = useState(false);
   const [qr, setQr] = useState("");
-  const [reveal, setReveal] = useState<Reveal | null>(null);
-  const [myPick, setMyPick] = useState<number | null>(null);
+  const [vote, setVote] = useState<{ cardId: string; answer: number | null } | null>(null);
+  const [connected, setConnected] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const [deckBusy, setDeckBusy] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [leavingRoom, setLeavingRoom] = useState(false);
-  const [abilityNotice, setAbilityNotice] = useState<{ playerId: string; nickname: string; role: Role; ability: Ability } | null>(null);
-  const [shopNotice, setShopNotice] = useState<{ coinsAwarded: number; enemiesDefeated: number } | null>(null);
+  const [abilityQueue, setAbilityQueue] = useState<Array<{ playerId: string; nickname: string; role: Role; ability: Ability }>>([]);
+  const abilityNotice = abilityQueue[0] ?? null;
+  const [itemNotice, setItemNotice] = useState<{ playerId: string; nickname: string; item: ShopItem } | null>(null);
   const playerId = useMemo(getPlayerId, []);
 
   useEffect(() => {
@@ -83,8 +94,8 @@ export default function App() {
   useEffect(() => {
     const client: Socket<ServerEvents, ClientEvents> = io(SERVER_URL, { autoConnect: false, reconnection: true });
     setSocket(client);
-    client.on("room:state", setRoom);
-    client.on("room:error", (e: { message: string }) => { setError(e.message); setJoining(false); });
+    client.on("room:state", state => { setRoom(state); setError(""); });
+    client.on("room:error", e => { setError(e.message); setJoining(false); if (["ROOM_NOT_FOUND", "PLAYER_NOT_FOUND"].includes(e.code)) { setRoom(null); sessionStorage.removeItem("dungeon-room-code"); } });
     client.on("room:created", ({ code: newCode }: { code: string }) => {
       setCode(newCode); setJoining(false); history.pushState({}, "", `/sala/${newCode}`);
     });
@@ -98,16 +109,12 @@ export default function App() {
       setRoom(null); setCode(""); setInitialCode(""); setError(""); setMenuOpen(false); setLeavingRoom(false);
       sessionStorage.removeItem("dungeon-room-code"); history.pushState({}, "", "/");
     });
-    client.on("game:reveal", (r: Reveal) => {
-      setReveal(r);
-      window.setTimeout(() => {
-        setReveal(null);
-        setMyPick(null);
-      }, GAME_CONFIG.answerRevealMs);
-    });
-    client.on("game:ability", setAbilityNotice);
-    client.on("game:shop", setShopNotice);
+    client.on("game:vote", setVote);
+    client.on("game:ability", notice => setAbilityQueue(queue => [...queue, notice]));
+    client.on("game:item", setItemNotice);
+    client.on("disconnect", () => setConnected(false));
     client.on("connect", () => {
+      setConnected(true);
       const savedCode = sessionStorage.getItem("dungeon-room-code");
       const pathCode = window.location.pathname.match(/^\/sala\/([^/]+)\/?$/i)?.[1]?.toUpperCase();
       if (savedCode && pathCode === savedCode) client.emit("room:reconnect", { code: savedCode, playerId });
@@ -119,15 +126,25 @@ export default function App() {
 
   useEffect(() => {
     if (!abilityNotice) return;
-    const timeout = window.setTimeout(() => setAbilityNotice(null), 3200);
+    const timeout = window.setTimeout(() => setAbilityQueue(queue => queue.slice(1)), 1800);
     return () => window.clearTimeout(timeout);
   }, [abilityNotice]);
+
+  useEffect(() => {
+    if (room?.status !== "playing") { setAbilityQueue([]); setItemNotice(null); }
+  }, [room?.status]);
+
+  useEffect(() => {
+    if (!itemNotice) return;
+    const timeout = window.setTimeout(() => setItemNotice(null), 2400);
+    return () => window.clearTimeout(timeout);
+  }, [itemNotice]);
 
   useEffect(() => {
     if (room?.code) sessionStorage.setItem("dungeon-room-code", room.code);
     else sessionStorage.removeItem("dungeon-room-code");
     if (room) QRCode.toDataURL(`${window.location.origin}/sala/${room.code}`, { width: 180, margin: 1, color: { dark: "#e8d6a8", light: "#211e18" } }).then(setQr).catch(() => setQr(""));
-  }, [room]);
+  }, [room?.code]);
 
   // Sólo hace falta el tick del reloj mientras hay una pregunta en el aire.
   useEffect(() => {
@@ -135,13 +152,6 @@ export default function App() {
     const tick = setInterval(() => setNow(Date.now()), 200);
     return () => clearInterval(tick);
   }, [room?.status]);
-
-  // La carta en juego cambia recién cuando se reparte la siguiente: es el momento
-  // limpio de forgets de la ronda anterior.
-  useEffect(() => {
-    setMyPick(null);
-    setReveal(null);
-  }, [room?.game?.current?.id]);
 
   const enter = (create: boolean) => {
     const name = nickname.trim();
@@ -199,7 +209,8 @@ export default function App() {
       <header className="top battle-nav"><div className="brand"><span>Mazmorras y Parciales</span></div><div className="battle-nav-actions"><button className="secondary nav-toggle" onClick={() => setMenuOpen(v => !v)} aria-expanded={menuOpen}>☰ Menú</button></div>
         {menuOpen && <nav className="game-menu" aria-label="Menú de partida"><strong>¿Qué querés hacer?</strong><button disabled={me?.eliminated} onClick={() => { socket?.emit("game:forfeit"); setMenuOpen(false); }}>Abandonar el combate</button><small>Vas a quedar como espectador mientras el grupo sigue.</small><button className="leave-action" disabled={leavingRoom} onClick={leaveRoom}>{leavingRoom ? "Saliendo…" : "Salir de la sala"}</button></nav>}
       </header>
-      <GameBoard room={room} meId={playerId} reveal={reveal} myPick={myPick} now={now} abilityNotice={abilityNotice} shopNotice={shopNotice} onPick={i => { setMyPick(i); socket?.emit("game:answer", { answer: i }); }} onAbility={a => socket?.emit("game:ability", { ability: a })} onBuy={(item, targetId) => socket?.emit("game:shop:buy", { item, targetId })} onShopContinue={() => socket?.emit("game:shop:continue")} onSceneContinue={() => socket?.emit("game:scene:continue")} error={error}/>
+      {!connected && <p className="connection-banner" role="status">Reconectando… Tu partida se recupera al volver la conexión.</p>}
+      <GameBoard room={room} meId={playerId} myPick={vote?.cardId === room.game.current?.id ? vote?.answer ?? null : null} now={now} abilityNotice={abilityNotice} itemNotice={itemNotice} onPick={i => { if (socket?.connected) socket.emit("game:answer", { answer: i, cardId: room.game!.current!.id }); }} onAbility={a => socket?.connected && socket.emit("game:ability", { ability: a })} onBuy={item => socket?.connected && socket.emit("game:shop:buy", { item })} onUse={(item, targetId) => socket?.connected && socket.emit("game:item:use", { item, targetId })} onContinue={() => socket?.connected && socket.emit("game:continue", { phase: getContinuePhase(room.game!) })} onClaim={choice => socket?.connected && socket.emit("game:event:claim", { choice })} onSceneContinue={() => socket?.connected && socket.emit("game:scene:continue")} error={error}/>
     </main>
   );
 
@@ -278,140 +289,129 @@ function SceneBoard({ room, meId, onContinue, error }: { room: RoomState; meId: 
   </div>;
 }
 
-function GameBoard({ room, meId, reveal, myPick, now, abilityNotice, shopNotice, onPick, onAbility, onBuy, onShopContinue, onSceneContinue, error }: {
-  room: RoomState; meId: string; reveal: Reveal | null; myPick: number | null; now: number;
+const itemInfo: Record<ShopItem, { name: string; sprite: string; description: string }> = {
+  healing: { name: "Poción de vida", sprite: "life-potion", description: "Recuperá hasta 2 corazones." },
+  revive: { name: "Vial de resurrección", sprite: "resurrection", description: "Reviví a un aventurero con 1 corazón." },
+  partyHeal: { name: "Botiquín grupal", sprite: "medipack", description: "Curá 1 corazón a cada aliado en pie." },
+  ward: { name: "Sello protector", sprite: "ward", description: "Protegé al grupo del próximo fallo." },
+  bomb: { name: "Bomba arcana", sprite: "bomb", description: "Sumá 2 de daño al próximo acierto grupal." },
+  focus: { name: "Pergamino de enfoque", sprite: "focus", description: "Recargá las habilidades del equipo." },
+  phoenix: { name: "Alma fénix", sprite: "resurrection", description: "Reviví a todos los aliados caídos." },
+};
+
+function Popup({ title, children }: { title: string; children: React.ReactNode }) {
+  const ref = useRef<HTMLDialogElement>(null);
+  useEffect(() => { ref.current?.showModal(); }, []);
+  return <dialog ref={ref} className="event-popup" aria-label={title} onCancel={e => e.preventDefault()}>{children}</dialog>;
+}
+
+function ReadyButton({ room, meId, onContinue, disabled = false }: { room: RoomState; meId: string; onContinue: () => void; disabled?: boolean }) {
+  const ready = room.game!.continueReady;
+  const connected = room.players.filter(p => p.online);
+  const waiting = connected.filter(p => !ready.includes(p.id));
+  return <div className="ready-controls">
+    <button className="primary" disabled={disabled || ready.includes(meId)} onClick={onContinue}>{ready.includes(meId) ? "✓ Listo · esperando al grupo" : "Continuar →"}</button>
+    <p role="status">{connected.length - waiting.length}/{connected.length} listos<span>{waiting.length ? `Falta: ${waiting.map(p => p.nickname).join(", ")}` : "¡Adelante!"}</span></p>
+  </div>;
+}
+
+function Inventory({ room, meId, onUse }: { room: RoomState; meId: string; onUse: (item: ShopItem, targetId?: string) => void }) {
+  const me = room.players.find(p => p.id === meId)!;
+  const [target, setTarget] = useState("");
+  const downed = room.players.filter(p => p.eliminated);
+  const selectedTarget = downed.some(p => p.id === target) ? target : downed[0]?.id;
+  const stocked = (Object.keys(itemInfo) as ShopItem[]).filter(item => (me.inventory[item] ?? 0) > 0);
+  const canUse = (item: ShopItem) => {
+    if (item === "healing") return !me.eliminated && me.hp < me.maxHp;
+    if (item === "revive" || item === "phoenix") return downed.length > 0;
+    if (item === "partyHeal") return room.players.some(p => !p.eliminated && p.hp < p.maxHp);
+    if (item === "ward") return !room.game!.teamWard;
+    if (item === "bomb") return room.game!.bonusDamage === 0;
+    if (item === "focus") return room.players.some(p => (room.game!.abilityReadyAt[p.id] ?? 0) > room.game!.turnNumber + (room.game!.deadline ? 0 : 1));
+    return true;
+  };
+  return <section className="inventory" aria-label="Tu mochila"><div className="inventory-heading"><h3>Mochila</h3><span><img src="/sprites/items/coin.png" alt="Monedas"/>{me.coins}</span></div>
+    <div className="inventory-slots">{stocked.map(item => <button key={item} className="item-slot" disabled={!canUse(item)} onClick={() => onUse(item, item === "revive" ? selectedTarget : undefined)} title={`${itemInfo[item].name}: ${itemInfo[item].description}`} aria-label={`Usar ${itemInfo[item].name} (${me.inventory[item]})`}><img src={`/sprites/items/${itemInfo[item].sprite}.png`} alt=""/><span>{itemInfo[item].name}</span><b>×{me.inventory[item]}</b></button>)}{!stocked.length && <p className="empty-bag">La mochila está vacía. Reabastecete en la próxima tienda.</p>}</div>
+    {downed.length > 0 && (me.inventory.revive ?? 0) > 0 && <label className="revive-target">Revivir a <select value={selectedTarget} onChange={e => setTarget(e.target.value)}>{downed.map(p => <option key={p.id} value={p.id}>{p.nickname}</option>)}</select></label>}
+    <small>Elegí un objeto para usarlo. Los efectos preparados duran hasta activarse.</small>
+  </section>;
+}
+
+function GameBoard({ room, meId, myPick, now, abilityNotice, itemNotice, onPick, onAbility, onBuy, onUse, onContinue, onClaim, onSceneContinue, error }: {
+  room: RoomState; meId: string; myPick: number | null; now: number;
   abilityNotice: { playerId: string; nickname: string; role: Role; ability: Ability } | null;
-  shopNotice: { coinsAwarded: number; enemiesDefeated: number } | null;
+  itemNotice: { playerId: string; nickname: string; item: ShopItem } | null;
   onPick: (i: number) => void; onAbility: (a: Ability) => void; onSceneContinue: () => void; error: string;
-  onBuy: (item: Parameters<ClientEvents["game:shop:buy"]>[0]["item"], targetId?: string) => void; onShopContinue: () => void;
+  onBuy: (item: ShopItem) => void; onUse: (item: ShopItem, targetId?: string) => void; onContinue: () => void;
+  onClaim: (choice: "heal" | "focus" | "coins" | "item") => void;
 }) {
   const game = room.game!;
-  const me = room.players.find(p => p.id === meId);
-  if (game.currentScene) return <SceneBoard room={room} meId={meId} onContinue={onSceneContinue} error={error}/>;
-  const creator = Boolean(me?.isCreator);
+  const me = room.players.find(p => p.id === meId)!;
   const enemy = game.enemy;
+  const reveal = game.reveal;
   const closed = game.deadline === 0;
   const preview = !closed && now < game.answerStartsAt;
   const total = preview ? GAME_CONFIG.promptPreviewSeconds * 1000 : Math.max(1, game.deadline - game.answerStartsAt);
   const left = Math.max(0, preview ? game.answerStartsAt - now : game.deadline - now);
-  const shown = game.visibleOptions ?? game.current?.options.map((_, i) => i) ?? [];
-  const canAct = !me?.eliminated && !closed && !preview && myPick === null;
-  const myAbility = me?.role ? abilityInfo[me.role] : null;
+  const visible = game.visibleOptions ?? game.current?.options.map((_, i) => i) ?? [];
+  const shown = myPick !== null && !visible.includes(myPick) ? [...visible, myPick] : visible;
+  const canAct = !me.eliminated && !closed && !preview && left > 0 && myPick === null;
+  const myAbility = me.role ? abilityInfo[me.role] : null;
   const myActiveEffects = game.usedAbilities[meId] ?? [];
-  const abilityCooldown = me ? Math.max(0, (game.abilityReadyAt[me.id] ?? 0) - game.turnNumber - 1) : 0;
-  const abilityNeedsMoreOptions = myAbility?.ability === "discard";
-  const abilityReady = canAct && abilityCooldown === 0 && (!abilityNeedsMoreOptions || shown.length > 2);
-  const shopPrices = getShopPrices(room.players.length);
+  const abilityCooldown = Math.max(0, (game.abilityReadyAt[meId] ?? 0) - game.turnNumber);
+  const abilityReady = !me.eliminated && !closed && !preview && left > 0 && abilityCooldown === 0;
+  const correctVisible = Boolean(reveal && now >= game.revealedAt + GAME_CONFIG.feedbackCorrectDelayMs);
+  const prices = getShopPrices(room.players.length);
+  const event = game.encounter;
+  const claimed = game.encounterClaimed.includes(meId);
+  const inventory = <Inventory room={room} meId={meId} onUse={onUse}/>;
+  const cast = abilityNotice ? <div key={`${abilityNotice.playerId}-${abilityNotice.ability}-${game.turnNumber}`} className={`spell-cast spell-${abilityNotice.ability}`} role="status"><div className="spell-runes"/><span className="spell-hero"><span className="hero-art-window"><img src={playerSpriteUrl(abilityNotice.role)} alt=""/></span></span><div><small>{abilityNotice.nickname} invoca</small><strong>{abilityInfo[abilityNotice.role].name}</strong><span>{roleInfo[abilityNotice.role].split(": ")[1]}</span></div><b className="spell-symbol">{abilityInfo[abilityNotice.role].icon}</b></div> : null;
+  const itemEffect = itemNotice && <div className="item-effect" role="status"><img src={`/sprites/items/${itemInfo[itemNotice.item].sprite}.png`} alt=""/><span>{itemNotice.nickname} usó <b>{itemInfo[itemNotice.item].name}</b></span></div>;
 
-  return <div className="board">
-    {abilityNotice && <div key={`${abilityNotice.playerId}-${abilityNotice.ability}-${game.turnNumber}`} className="ability-announcement" role="status"><span>{abilityInfo[abilityNotice.role].icon}</span><div><strong>{abilityNotice.nickname}</strong> activó <b>{abilityInfo[abilityNotice.role].name}</b></div></div>}
-    {game.shopOpen && <section className="panel shop-panel" aria-label="Tienda de la mazmorra">
-      <header><div><p className="eyebrow">{game.enemiesDefeated ? `DESCANSO · ${game.enemiesDefeated} ENEMIGOS` : "ÚLTIMA OPORTUNIDAD"}</p><h2>{!room.players.some(p => !p.eliminated) ? "Reúnan al equipo" : "Tienda del camino"}</h2><p>{shopNotice?.coinsAwarded === 0 ? "El grupo cayó. Comprá una poción para seguir." : shopNotice ? `A cada aventurero le tocaron ${shopNotice.coinsAwarded} monedas por el último enemigo.` : "Cada enemigo deja entre 1 y 3 monedas para cada aventurero."}</p></div><span className="shop-wallet"><img src="/sprites/items/coin.png" alt=""/> {me?.coins ?? 0}</span></header>
-      <div className="shop-items">
-        <article><img src="/sprites/items/life-potion.png" alt=""/><div><strong>Poción de vida</strong><small>Recuperás hasta 2 corazones · {shopPrices.healing} monedas</small></div><button disabled={!me || me.eliminated || me.hp >= me.maxHp || (me.coins ?? 0) < shopPrices.healing} onClick={() => onBuy("healing")}>Comprar</button></article>
-        <article><img src="/sprites/items/resurrection.png" alt=""/><div><strong>Vial de resurrección</strong><small>Devuelve a alguien con 1 corazón · {shopPrices.revive} monedas</small></div><div className="shop-actions">{room.players.filter(p => p.eliminated).length ? room.players.filter(p => p.eliminated).map(p => <button key={p.id} disabled={(me?.coins ?? 0) < shopPrices.revive} onClick={() => onBuy("revive", p.id)}>Revivir a {p.nickname}</button>) : <button disabled>Sin caídos</button>}</div></article>
-        <article><img src="/sprites/items/medipack.png" alt=""/><div><strong>Botiquín grupal</strong><small>Cura 1 corazón al equipo · {shopPrices.partyHeal} monedas</small></div><button disabled={!me || !room.players.some(p => !p.eliminated && p.hp < p.maxHp) || (me.coins ?? 0) < shopPrices.partyHeal} onClick={() => onBuy("partyHeal")}>Comprar</button></article>
-        <article><img src="/sprites/items/ward.png" alt=""/><div><strong>Sello protector</strong><small>Bloquea el próximo fallo · {shopPrices.ward} monedas</small></div><button disabled={!me || game.teamWard || (me.coins ?? 0) < shopPrices.ward} onClick={() => onBuy("ward")}>Comprar</button></article>
-        <article><img src="/sprites/items/bomb.png" alt=""/><div><strong>Bomba de humo</strong><small>El próximo acierto hace +2 de daño · {shopPrices.bomb} monedas</small></div><button disabled={!me || game.bonusDamage > 0 || (me.coins ?? 0) < shopPrices.bomb} onClick={() => onBuy("bomb")}>Comprar</button></article>
-        <article><img src="/sprites/items/focus.png" alt=""/><div><strong>Pergamino de enfoque</strong><small>Recarga las habilidades del grupo · {shopPrices.focus} monedas</small></div><button disabled={!me || (me.coins ?? 0) < shopPrices.focus} onClick={() => onBuy("focus")}>Comprar</button></article>
-        <article><img src="/sprites/items/resurrection.png" alt=""/><div><strong>Alma fénix</strong><small>Resucita a todo el equipo caído · {shopPrices.phoenix} monedas</small></div><button disabled={!me || !room.players.some(p => p.eliminated) || (me.coins ?? 0) < shopPrices.phoenix} onClick={() => onBuy("phoenix")}>Comprar</button></article>
-      </div>
-      <button className="shop-continue" disabled={!creator || !room.players.some(p => !p.eliminated)} onClick={onShopContinue}>{!room.players.some(p => !p.eliminated) ? "Resucitá a alguien para continuar" : creator ? "Seguir la aventura" : "Esperando al creador"}</button>
-    </section>}
+  return <div className={`board adventure-board ${game.teamWard ? "ward-active" : ""}`}>
+    {cast}{!event && !game.currentScene && itemEffect}
     <section className="panel enemy-card">
-      {enemy && <>
-        <div className={`enemy-art ${reveal?.correct ? "struck" : reveal && !reveal.timeUp ? "attacking" : ""}`} data-enemy={enemy.id} role="img" aria-label={enemy.name}>
-          <span className="enemy-sprite" style={{ backgroundImage: `url("/sprites/enemies/${enemy.id}.png")` }} aria-hidden="true" />
-          {reveal?.correct && <span className="impact effect-hit" aria-hidden="true">✦</span>}
-          {reveal && !reveal.correct && !reveal.timeUp && <span className="impact effect-miss" aria-hidden="true">✧</span>}
-        </div>
-        <div className="enemy-info"><p className="eyebrow">ENEMIGO {game.enemiesDefeated + 1}</p><h2>{enemy.name}</h2>
-          {enemy.trait && <span className="trait">{TRAIT_INFO[enemy.trait] ?? enemy.trait}</span>}
-          <div className="hp-bar"><div className="hp-fill enemy" style={{ width: `${(enemy.hp / enemy.maxHp) * 100}%` }}/><span>{enemy.hp} / {enemy.maxHp}</span></div>
-        </div>
-      </>}
-      <div className="deck-progress"><span className="mastered">{game.mastered}</span><small>de {game.pending} dominadas</small></div>
+      {enemy ? <><div className={`enemy-art ${reveal?.damage ? "struck" : reveal ? "attacking" : ""} ${abilityNotice?.ability === "track" ? "marked" : ""}`} data-enemy={enemy.id} role="img" aria-label={enemy.name}><span className="enemy-sprite" style={{ backgroundImage: `url("/sprites/enemies/${enemy.id}.png")` }}/>{reveal && reveal.damage > 0 && <span className="damage-number">−{reveal.damage}</span>}</div><div className="enemy-info"><p className="eyebrow">ENEMIGO {game.enemiesDefeated + 1}</p><h2>{enemy.name}</h2>{enemy.trait && <span className="trait">{TRAIT_INFO[enemy.trait] ?? enemy.trait}</span>}<div className="hp-bar"><div className="hp-fill enemy" style={{ width: `${enemy.hp / enemy.maxHp * 100}%` }}/><span>{enemy.hp} / {enemy.maxHp} PV</span></div></div></> : <div className="enemy-info"><p className="eyebrow">UN RESPIRO EN EL CAMINO</p><h2>La aventura continúa</h2></div>}
+      <div className="deck-progress"><strong>{game.questionsCompleted}<span>/{game.totalQuestions}</span></strong><small>preguntas resueltas</small><span className="accuracy">{me.correctAnswers}/{me.answersGiven} aciertos tuyos</span></div>
     </section>
 
     <section className="panel question-card">
-      <div className={`timer ${preview ? "preview" : left < 5000 && !closed ? "urgent" : ""}`}><div className="timer-fill" style={{ width: `${closed ? 0 : Math.min(100, (left / total) * 100)}%` }}/><span>{closed ? "—" : preview ? `Opciones en ${Math.ceil(left / 1000)}s` : `${Math.ceil(left / 1000)}s`}</span></div>
-      {game.current ? <>
-        <p className="prompt">{game.current.prompt}</p>
-        {preview
-          ? <div className="preview-hint"><span aria-hidden="true">◷</span> Leé la pregunta. Las opciones aparecen en {Math.ceil(left / 1000)} segundos.</div>
-        : <ul className="options">{shown.map(i => {
-          const isCorrect = reveal?.answer === i;
-          const isMyWrong = reveal && myPick === i && !reveal.correct;
-          const isSelected = myPick === i && !reveal;
-          return <li key={i}>
-            <button className={`option ${isSelected ? "selected" : ""} ${isCorrect ? "correct" : ""} ${isMyWrong ? "wrong" : ""} ${myPick === i && reveal?.correct ? "hit" : ""}`} aria-pressed={isSelected} disabled={closed || !canAct} onClick={() => onPick(i)}>
-              {game.current!.options[i]}
-              {isSelected && <span className="option-selected-mark" aria-hidden="true">✓ <span>SELECCIONADA</span></span>}
-            </button>
-          </li>;
+      <div className="question-heading"><p className="eyebrow">DESAFÍO {Math.min(game.turnNumber, game.totalQuestions).toString().padStart(2, "0")}</p><span>{closed ? "Resultado del grupo" : preview ? "Lectura" : "Elegí tu respuesta"}</span></div>
+      <div className={`timer ${preview ? "preview" : left < 5000 && !closed ? "urgent" : ""}`}><div className="timer-fill" style={{ width: `${closed ? 0 : Math.min(100, left / total * 100)}%` }}/><span>{closed ? "Ronda terminada" : preview ? `Opciones en ${Math.ceil(left / 1000)}s` : `${Math.ceil(left / 1000)}s`}</span></div>
+      {game.current ? <><h1 className="prompt">{game.current.prompt}</h1>
+        {preview ? <div className="preview-hint">◷ Leé con calma. Enseguida aparecen las opciones.</div> : <ul className="options">{shown.map((i, position) => {
+          const isCorrect = Boolean(reveal && correctVisible && reveal.answer === i);
+          const isWrong = Boolean(reveal && reveal.answer !== i);
+          const selected = myPick === i;
+          return <li key={i}><button className={`option ${selected && !reveal ? "selected" : ""} ${isCorrect ? "correct" : ""} ${isWrong ? "wrong" : ""}`} aria-pressed={selected} disabled={!canAct} onClick={() => onPick(i)}><span className="option-letter">{String.fromCharCode(65 + position)}</span><span>{game.current!.options[i]}</span><span className="option-state">{isCorrect ? "✓ Correcta" : isWrong ? selected ? "✕ Tu elección" : "✕" : selected ? "✓ Elegida" : ""}</span></button></li>;
         })}</ul>}
-        {!closed && !preview && myPick !== null && <p className="vote-status" role="status"><span aria-hidden="true">✓</span><span><strong>Respuesta seleccionada</strong><small>Tu elección quedó registrada · {game.votesReceived} de {room.players.filter(player => player.online && !player.eliminated).length} votaron.</small></span></p>}
-      </> : <p className="prompt waiting-prompt">Preparando la siguiente pregunta…</p>}
-      {reveal && <div className={`reveal ${reveal.correct ? "good" : reveal.timeUp ? "timeup" : "bad"}`}>
-        <strong>{reveal.timeUp ? "Se acabó el tiempo" : reveal.correct ? "Ronda resuelta" : "Fallaron"}</strong>
-        {reveal.answer !== null && <span>Correcta: {game.current?.options[reveal.answer]}</span>}
-        {reveal.correct && reveal.damage > 0 && <span>−{reveal.damage} de vida al enemigo</span>}
-        {reveal.timeUp && <span>{reveal.wardBlocked ? "El Muro Sagrado bloqueó el daño para todo el grupo." : reveal.damage === 0 ? "Ya habías recibido daño por esta pregunta." : "Se agotó el tiempo: quienes aún no habían fallado perdieron 1 vida."}</span>}
-        {reveal.healedPlayer && <span>{reveal.healedPlayer} recuperó {reveal.healedAmount} de vida</span>}
-        {!reveal.correct && !reveal.timeUp && reveal.damage === 0 && <span>Una protección anuló el daño.</span>}
-        {reveal.explanation && <p>{reveal.explanation}</p>}
-      </div>}
-      {error && <p role="status" className="message">{error}</p>}
+        {!closed && !preview && <p className="vote-status" role="status">{myPick !== null ? "Tu respuesta quedó guardada en azul." : me.eliminated ? "Estás caído. Podés usar la mochila y continuar con el grupo." : "Una elección por pregunta."} <span>{game.votesReceived}/{room.players.filter(p => p.online && !p.eliminated).length} votos · resolvemos al terminar el reloj</span></p>}
+      </> : <div className="between-questions"><span>✦</span><h1>Un alto en la aventura</h1><p>Prepará tu equipo para el próximo desafío.</p></div>}
+      {reveal && <div className="round-review" aria-live="polite">{correctVisible ? <><div className="review-summary"><strong>{myPick === reveal.answer ? "¡Acertaste!" : myPick === null ? "No llegaste a responder" : "Esta vez no salió"}</strong><span>{reveal.correctVotes} aciertos · {reveal.wrongVotes} fallos · {reveal.damage} de daño al enemigo</span></div>{reveal.explanation && <p className="explanation">{reveal.explanation}</p>}{reveal.wardBlocked && <p>El escudo protegió al equipo.</p>}<ReadyButton room={room} meId={meId} onContinue={onContinue} disabled={now < game.revealedAt + GAME_CONFIG.answerRevealMs}/></> : <p>Revisando las respuestas…</p>}</div>}
+      {error && !event && !game.currentScene && <p role="status" className="message">{error}</p>}
     </section>
 
-    <section className="panel crew-card">
-      <p className="eyebrow">EL GRUPO</p>
-      <ul className="crew">{room.players.map(p => <li key={p.id} className={`${!p.online ? "offline" : ""} ${p.eliminated ? "down" : ""}`}>
-        <div className={`avatar character-sprite role-${roleSpriteId(p.role)}`} aria-label={p.role ?? "Aventurero"}>
-          <span className="hero-art-window"><img src={playerSpriteUrl(p.role)} alt=""/></span>
-          {reveal?.healedPlayer === p.nickname && <i className="effect-heal" aria-hidden="true">＋</i>}
-          {reveal && !reveal.correct && <i className="effect-damage" aria-hidden="true">✦</i>}
-          {p.eliminated && <img className="death-marker" src="/sprites/tombstone.svg" alt="Caído"/>}
-        </div>
-        <div className="crew-name"><strong>{p.nickname}</strong><small>{p.role ?? "sin rol"}</small><small className="crew-coins"><img src="/sprites/items/coin.png" alt=""/>{p.coins ?? 0}</small></div>
-        <div className="vitality" role="img" aria-label={`Vida de ${p.nickname}: ${p.hp} de ${p.maxHp}`}>
-          <span className="hearts">{Array.from({ length: p.maxHp }, (_, i) => <i key={i} className={i < p.hp ? "heart full" : "heart empty"} aria-hidden="true">{i < p.hp ? "♥" : "♡"}</i>)}</span>
-        </div>
-        {(game.usedAbilities[p.id] ?? []).filter(ability => effectLabel[ability]).map(ability => <span key={ability} className="crew-effect">{effectLabel[ability]}</span>)}
-      </li>)}</ul>
-      <div className="abilities">
-        {myAbility && <button className={`ability ${myActiveEffects.includes(myAbility.ability) || (myAbility.ability === "ward" && game.teamWard) ? "armed" : ""}`} disabled={!abilityReady} onClick={() => onAbility(myAbility.ability)}>
-          {myAbility.icon} {myAbility.name}{abilityCooldown > 0 ? ` · ${abilityCooldown} preguntas` : abilityNeedsMoreOptions && shown.length <= 2 ? " · necesita 3 opciones" : " · LISTO"}
-        </button>}
-        {game.teamWard && <span className="team-effect">⬟ Muro Sagrado protege al grupo</span>}
-        {me?.eliminated && <span className="ability-note down">Pueden resucitarte en la tienda</span>}
-      </div>
-    </section>
+    <aside className="panel crew-card"><p className="eyebrow">TU COMPAÑÍA · {room.players.length}</p><ul className="crew">{room.players.map(p => <li key={p.id} className={`${!p.online ? "offline" : ""} ${p.eliminated ? "down" : ""} ${p.id === meId ? "self" : ""} ${abilityNotice?.playerId === p.id ? "casting" : ""}`}><div className="avatar character-sprite"><span className="hero-art-window"><img src={playerSpriteUrl(p.role)} alt={p.role ?? "Aventurero"}/></span>{p.eliminated && <img className="death-marker" src="/sprites/tombstone.svg" alt="Caído"/>}</div><div className="crew-name"><strong>{p.nickname}{p.id === meId ? " · vos" : ""}</strong><small>{p.online ? p.role : "Sin conexión"}</small><span className="hearts" aria-label={`${p.hp} de ${p.maxHp} vidas`}>{"♥".repeat(p.hp)}<span>{"♡".repeat(p.maxHp - p.hp)}</span></span></div><span className="crew-ready">{game.continueReady.includes(p.id) ? "✓" : ""}</span>{(game.usedAbilities[p.id] ?? []).filter(a => ["strike", "evade", "track"].includes(a)).map(a => <span key={a} className="crew-effect">{effectLabel[a]}</span>)}</li>)}</ul><p className="party-stat">Equipo: {game.correctAnswers}/{game.answersGiven} respuestas acertadas</p></aside>
+
+    <section className="panel action-dock"><div className="ability-panel"><div><p className="eyebrow">{me.role ?? "AVENTURERO"}</p><h3>Tu habilidad</h3></div>{myAbility && <button className={`ability ${myActiveEffects.includes(myAbility.ability) ? "armed" : ""}`} disabled={!abilityReady || (myAbility.ability === "discard" && shown.length <= 2) || (["strike", "evade", "track"].includes(myAbility.ability) && myActiveEffects.includes(myAbility.ability))} onClick={() => onAbility(myAbility.ability)} title={me.role ? roleInfo[me.role] : ""}><span className="ability-icon">{myAbility.icon}</span><span><strong>{myAbility.name}</strong><small>{abilityCooldown > 0 ? `Recarga: ${abilityCooldown} preguntas` : myActiveEffects.includes(myAbility.ability) ? "Efecto preparado" : "Activar poder"}</small></span></button>}<p className="ability-description">{me.role && roleInfo[me.role].split(": ")[1]}</p>{game.teamWard && <span className="team-effect">⬟ Escudo grupal activo</span>}{game.bonusDamage > 0 && <span className="team-effect">✦ Próximo impacto +{game.bonusDamage}</span>}</div>{!event && !game.currentScene && inventory}</section>
+
+    {game.currentScene && <Popup title={game.currentScene.title}><SceneBoard room={room} meId={meId} onContinue={onSceneContinue} error={error}/>{inventory}{itemEffect}</Popup>}
+    {event && <Popup title={event === "shop" ? "Tienda del camino" : "Encuentro de la mazmorra"}><div className={`encounter-banner encounter-${event}`} aria-hidden="true">{event === "shop" ? "⚒" : event === "campfire" ? "♨" : event === "treasure" ? "◆" : "✧"}</div><p className="eyebrow">ENCUENTRO · EL RELOJ ESTÁ PAUSADO</p><h2>{event === "shop" ? !room.players.some(p => !p.eliminated) ? "Una última oportunidad" : "El mercader del camino" : event === "campfire" ? "La fogata de los viajeros" : event === "treasure" ? "El cofre olvidado" : "El santuario de las runas"}</h2><p className="event-description">{event === "shop" ? !room.players.some(p => !p.eliminated) ? "El equipo cayó. Comprá un vial y usalo desde la mochila para revivir a alguien. Este rescate se ofrece una sola vez." : "Comprá provisiones y guardalas para cuando las necesites. Cada acierto personal entrega una moneda." : event === "campfire" ? "Sentate junto al fuego. Elegí recuperar un corazón o preparar tu habilidad." : event === "treasure" ? "Cada aventurero puede elegir: cuatro monedas o una bomba arcana." : "Las runas despiertan. Elegí un sello protector o recargá tu habilidad."}</p>
+      {event === "shop" ? <div className="shop-items">{(Object.keys(itemInfo) as ShopItem[]).map(item => <article key={item}><img src={`/sprites/items/${itemInfo[item].sprite}.png`} alt=""/><div><strong>{itemInfo[item].name}</strong><small>{itemInfo[item].description}</small></div><button disabled={me.coins < prices[item]} onClick={() => onBuy(item)} aria-label={`Comprar ${itemInfo[item].name} por ${prices[item]} monedas`}>{prices[item]} ◈</button></article>)}</div> : <div className="event-choices"><button className="secondary" disabled={claimed} onClick={() => onClaim(event === "campfire" ? "heal" : event === "treasure" ? "coins" : "item")}>{event === "campfire" ? "♥ Recuperar 1 corazón" : event === "treasure" ? "◈ Tomar 4 monedas" : "⬟ Guardar sello protector"}</button><button className="secondary" disabled={claimed} onClick={() => onClaim(event === "treasure" ? "item" : "focus")}>{event === "treasure" ? "✦ Guardar bomba arcana" : "✧ Recargar habilidad"}</button>{claimed && <p role="status">✓ Recompensa recibida</p>}</div>}
+      {inventory}{error && <p role="status" className="message">{error}</p>}<ReadyButton room={room} meId={meId} onContinue={onContinue} disabled={!room.players.some(p => !p.eliminated)}/>{itemEffect}
+    </Popup>}
   </div>;
 }
 
 function ResultsScreen({ room, meId, onAgain, canRestart, onHome }: { room: RoomState; meId: string; onAgain: () => void; canRestart: boolean; onHome: () => void }) {
-  const game = room.game;
-  const me = room.players.find(p => p.id === meId);
-  const won = game?.outcome === "won";
-  const minutes = game?.finishedAt && game.startedAt ? Math.max(1, Math.round((game.finishedAt - game.startedAt) / 60000)) : 0;
-  return <div className="board">
-    <section className={`panel results ${won ? "won" : "lost"}`}>
-      <div className="result-sigil">{won ? "✦" : "☠"}</div>
-      <h1>{won ? "¡Mazmorra conquistada!" : game?.outcome === "abandoned" ? "Partida abandonada" : "El grupo cayó"}</h1>
-      <p className="intro">{won ? "Dominaron todas las cartas del mazo." : "Se quedaron sin vida. La misma mazmorra los espera."}</p>
-      <ul className="stats">
-        <li><strong>{game?.mastered ?? 0}</strong><span>cartas dominadas</span></li>
-        <li><strong>{game?.enemiesDefeated ?? 0}</strong><span>enemigos derrotados</span></li>
-        <li><strong>{minutes}′</strong><span>de duración</span></li>
-        <li><strong>{room.players.filter(p => !p.eliminated).length}/{room.players.length}</strong><span>en pie</span></li>
-      </ul>
-      <div className="result-actions">
-        {canRestart
-          ? <button className="primary full" onClick={onAgain}>Volver al lobby</button>
-          : <p className="small-note center">{me?.isCreator ? "" : "Esperando a que el creador rearme la sala…"}</p>}
-        <button className="secondary full" onClick={onHome}>Salir de la sala</button>
-      </div>
-    </section>
-  </div>;
+  const game = room.game!;
+  const me = room.players.find(p => p.id === meId)!;
+  const won = game.outcome === "won";
+  const seconds = Math.max(0, Math.round(((game.finishedAt ?? game.startedAt) - game.startedAt) / 1000));
+  const accuracy = game.answersGiven ? Math.round(game.correctAnswers / game.answersGiven * 100) : 0;
+  return <section className={`results-screen ${won ? "won" : "lost"}`}>
+    <p className="eyebrow">CRÓNICA DE LA EXPEDICIÓN · {room.deck?.title}</p><div className="victory-stage"><div className="pixel-gate"/>{room.players.map(p => <div key={p.id} className={`victory-hero ${p.eliminated ? "down" : ""}`}><span className="hero-art-window"><img src={playerSpriteUrl(p.role)} alt={p.role ?? "Aventurero"}/></span><span>{p.nickname}</span></div>)}</div>
+    <p className="result-ribbon">{won ? "MAZMORRA COMPLETADA" : game.outcome === "abandoned" ? "EXPEDICIÓN INTERRUMPIDA" : "FIN DE LA EXPEDICIÓN"}</p><h1>{won ? "¡La compañía hizo historia!" : "Todavía quedan aventuras"}</h1><p className="result-description">{won ? "Llegaron al final del recorrido. Cada respuesta deja algo para la próxima aventura." : "Reagrúpense, repasen lo aprendido y vuelvan a intentarlo."}</p>
+    <ul className="result-stats"><li><strong>{game.questionsCompleted}/{game.totalQuestions}</strong><span>preguntas resueltas</span></li><li><strong>{accuracy}%</strong><span>aciertos del equipo</span></li><li><strong>{game.enemiesDefeated}</strong><span>enemigos vencidos</span></li><li><strong>{Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, "0")}</strong><span>tiempo de aventura</span></li></ul><div className="personal-result">Tu registro, {me.nickname}: <strong>{me.correctAnswers}/{me.answersGiven} aciertos</strong></div><div className="result-actions">{canRestart ? <button className="primary" onClick={onAgain}>Preparar otra aventura</button> : <p>Esperando a que el creador prepare otra aventura…</p>}<button className="secondary" onClick={onHome}>Volver al inicio</button></div>
+  </section>;
 }

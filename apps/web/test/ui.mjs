@@ -1,0 +1,81 @@
+import { chromium } from "playwright";
+import assert from "node:assert/strict";
+import { mkdir } from "node:fs/promises";
+const BASE = process.env.BASE ?? "http://localhost:3112";
+await mkdir("test-results/ui", { recursive: true });
+const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined, headless: true, args: ["--no-sandbox"] });
+try {
+const context = await browser.newContext({ viewport: { width: 1366, height: 768 } });
+await context.addInitScript(() => { Object.defineProperty(crypto, "randomUUID", { value: undefined }); });
+const page = await context.newPage();
+const errors = [];
+const failedRequests = [];
+page.on("response", r => { if (r.status() >= 400) failedRequests.push(`${r.status()} ${r.url()}`); });
+page.on("pageerror", e => errors.push(e.message));
+await page.goto(BASE);
+await page.evaluate(() => document.fonts.ready);
+await page.getByLabel("Nombre de aventurero").fill("Valentín");
+await page.getByRole("button", { name: "Crear una sala" }).click();
+await page.getByRole("button", { name: /^Guerrero/ }).click();
+const cards = Array.from({ length: 13 }, (_, i) => ({ prompt: `Desafío ${i + 1}: ¿Qué estructura celular conserva la información genética y coordina las funciones de la célula?`, options: ["El núcleo celular", "La membrana plasmática", "Los ribosomas", "El aparato de Golgi", "Las mitocondrias", "Los lisosomas"], answer: 0, explanation: "El núcleo contiene el ADN, que guarda la información genética y dirige las funciones celulares." }));
+await page.locator('input[type="file"]').setInputFiles({ name: "aventura.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify({ title: "El archivo de los sabios", cards })) });
+await page.screenshot({ path: "test-results/ui/lobby.png", fullPage: true });
+await page.getByRole("button", { name: "Comenzar la mazmorra" }).click();
+await page.getByRole("button", { name: /El núcleo celular/ }).waitFor();
+await page.getByRole("button", { name: /El núcleo celular/ }).click();
+await page.locator('.option.selected').waitFor();
+await page.waitForTimeout(250);
+const selectedColor = await page.locator('.option.selected').evaluate(el => getComputedStyle(el).backgroundColor);
+assert.equal(selectedColor, "rgb(29, 72, 114)");
+await page.screenshot({ path: "test-results/ui/battle-desktop.png", fullPage: true });
+const optionsBottom = await page.locator('.options').evaluate(el => el.getBoundingClientRect().bottom);
+assert.ok(optionsBottom < 768, `opciones fuera de pantalla: ${optionsBottom}`);
+await page.getByRole("button", { name: /Golpe demoledor/ }).click();
+await page.locator('.spell-cast').waitFor();
+await page.screenshot({ path: "test-results/ui/ability.png" });
+await page.locator('.option.wrong').first().waitFor();
+assert.equal(await page.locator('.option.correct').count(), 0, "los errores aparecen antes de la correcta");
+await page.locator('.option.correct').waitFor();
+assert.equal(await page.locator('.option.wrong').count(), await page.locator('.option').count() - 1);
+await page.screenshot({ path: "test-results/ui/reveal.png", fullPage: true });
+await page.getByRole("button", { name: "Continuar →" }).click();
+await page.getByRole("button", { name: /El núcleo celular/ }).waitFor();
+await page.setViewportSize({ width: 390, height: 844 });
+await page.getByRole("button", { name: /El núcleo celular/ }).click();
+await page.locator('.option.selected').waitFor();
+await page.waitForTimeout(250);
+await page.screenshot({ path: "test-results/ui/battle-mobile.png", fullPage: true });
+const mobile = await page.evaluate(() => ({ width: document.documentElement.scrollWidth, optionsBottom: document.querySelector('.options').getBoundingClientRect().bottom }));
+assert.ok(mobile.width <= 390, `overflow horizontal: ${mobile.width}`);
+assert.ok(mobile.optionsBottom < 844, `opciones mobile fuera de pantalla: ${mobile.optionsBottom}`);
+await page.getByRole("button", { name: "Continuar →" }).click();
+await page.getByRole("dialog").waitFor();
+await page.screenshot({ path: "test-results/ui/shop-mobile.png", fullPage: true });
+await page.setViewportSize({ width: 1366, height: 768 });
+await page.screenshot({ path: "test-results/ui/shop-desktop.png" });
+await page.getByRole("button", { name: /Comprar Poción de vida/ }).click();
+await page.getByRole("button", { name: /Usar Poción de vida \(2\)/ }).waitFor();
+await page.getByRole("button", { name: "Continuar →" }).click();
+for (let i = 2; i < 13; i++) {
+  await page.getByRole("button", { name: /El núcleo celular/ }).waitFor();
+  await page.getByRole("button", { name: /El núcleo celular/ }).click();
+  await page.getByRole("button", { name: "Continuar →" }).click();
+  if (i < 12 && (i + 1) % 2 === 0) {
+    await page.getByRole("dialog").waitFor();
+    const eventButton = page.locator('.event-choices button').first();
+    if (await eventButton.count()) await eventButton.click();
+    await page.getByRole("button", { name: "Continuar →" }).click();
+  }
+}
+await page.getByRole("heading", { name: "¡La compañía hizo historia!" }).waitFor();
+await page.screenshot({ path: "test-results/ui/victory.png", fullPage: true });
+await page.setViewportSize({ width: 390, height: 844 });
+await page.screenshot({ path: "test-results/ui/victory-mobile.png", fullPage: true });
+assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+assert.ok((await page.locator('.personal-result').innerText()).includes('13/13'));
+assert.deepEqual(errors, []);
+assert.deepEqual(failedRequests, []);
+console.log(JSON.stringify({ selectedColor, optionsBottom, mobile, browserErrors: errors, outcome: "victoria", screenshots: "test-results/ui/" }));
+} finally {
+  await browser.close();
+}

@@ -10,10 +10,12 @@
     "build": "npm run build --workspace @dungeon/shared && npm run build --workspace @dungeon/server && npm run build --workspace @dungeon/web",
     "start": "node apps/server/dist/index.js",
     "test": "npm run build --workspace @dungeon/shared && npm run build --workspace @dungeon/server && node --test apps/server/test/game.test.mjs apps/server/test/deck.test.mjs apps/server/test/spec.test.mjs",
-    "test:e2e": "bash apps/server/test/run-e2e.sh"
+    "test:e2e": "bash apps/server/test/run-e2e.sh",
+    "test:ui": "bash apps/web/test/run-ui.sh"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",
+    "playwright": "^1.63.0",
     "typescript": "^5.7.3"
   }
 }

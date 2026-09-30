@@ -4,6 +4,7 @@ import {
   ABILITY_COOLDOWNS,
   GAME_CONFIG,
   getShopPrices,
+  getContinuePhase,
   ROLE_ABILITIES,
   type Ability,
   type Card,
@@ -13,9 +14,10 @@ import {
   type Reveal,
   type Role,
   type RoomState,
+  type ShopItem,
 } from "@dungeon/shared";
 
-export type Timers = { deadline?: NodeJS.Timeout; advance?: NodeJS.Timeout };
+export type Timers = { deadline?: NodeJS.Timeout };
 export type DeckEntry = { type: "question"; card: Card } | { type: "scene"; scene: DeckScene };
 
 /** Estado real de la sala. Los campos fuera de RoomState NUNCA se transmiten: ver publicView(). */
@@ -36,6 +38,7 @@ export type EngineHooks = {
   onReveal: (room: GameRoom, reveal: Reveal) => void;
   onError: (room: GameRoom, playerId: string, code: string, message: string) => void;
   onAbility?: (room: GameRoom, player: Player, ability: Ability) => void;
+  onItem?: (room: GameRoom, player: Player, item: ShopItem) => void;
   onShop?: (room: GameRoom, coinsAwarded: number) => void;
 };
 
@@ -144,7 +147,7 @@ export function validateDeck(raw: unknown): { cards: Card[]; scenes: DeckScene[]
 }
 
 export function publicView(room: GameRoom): RoomState {
-  const { sockets: _s, cards: _c, timeline: _tl, remaining: _r, drawn: _d, discardedFor: _dd, timers: _t, ...state } = room;
+  const { sockets: _s, cards: _c, timeline: _tl, remaining: _r, drawn: _d, discardedFor: _dd, timers: _t, votes: _v, wrongPlayers: _w, ...state } = room;
   return {
     ...state,
     players: state.players.map((p) => ({ ...p })),
@@ -169,40 +172,28 @@ export function clearTimers(room: GameRoom) {
 const alive = (room: GameRoom) => room.players.filter((p) => !p.eliminated);
 const onlinePlayers = (room: GameRoom) => room.players.filter((p) => p.online);
 
-/**
- * Cierra la partida si corresponde. Si el equipo cae entero, pausa el combate en
- * una tienda de emergencia para que pueda comprar una resurrección.
- * @returns true si terminó o quedó pausada en la tienda de emergencia.
- */
+/** Ofrece un único rescate cuando cae el grupo; después, la derrota es definitiva. */
 function settle(room: GameRoom, hooks: EngineHooks) {
-  if (!room.players.some((p) => p.online)) return finish(room, hooks, "abandoned"), true;
+  if (!onlinePlayers(room).length) return finish(room, hooks, "abandoned"), true;
   if (!alive(room).length) {
-    const g = room.game;
-    if (g) {
-      const revivalPrice = getShopPrices(room.players.length).revive;
-      const canAffordRevival = room.players.some((player) => player.coins >= revivalPrice);
-      if (!canAffordRevival && g.emergencyRescueGranted) return finish(room, hooks, "lost"), true;
-      if (!canAffordRevival && !g.emergencyRescueGranted) {
-        for (const player of room.players) player.coins = Math.max(revivalPrice, player.coins);
-        g.emergencyRescueGranted = true;
-      }
-      if (!g.shopOpen) {
-        clearTimers(room);
-        if (g.currentScene) room.remaining.push({ type: "scene", scene: g.currentScene });
-        if (room.drawn && !room.remaining.some((entry) => entry.type === "question" && entry.card.id === room.drawn?.id)) room.remaining.push({ type: "question", card: room.drawn });
-        room.drawn = null;
-        g.current = null;
-        g.currentScene = null;
-        g.sceneReady = [];
-        g.shopOpen = true;
-        g.deadline = 0;
-        g.answerStartsAt = 0;
-        hooks.onState(room);
-        hooks.onShop?.(room, 0);
-      } else {
-        hooks.onState(room);
-      }
-    }
+    const g = room.game!;
+    if (g.shopOpen) return true;
+    if (g.emergencyRescueGranted) return finish(room, hooks, "lost"), true;
+    g.emergencyRescueGranted = true;
+    const price = getShopPrices(room.players.length).revive;
+    for (const player of room.players) player.coins = Math.max(price, player.coins);
+    // Si la caída sucede por abandono durante una pregunta, esa carta sigue pendiente.
+    if (room.drawn && !g.reveal) room.remaining.push({ type: "question", card: room.drawn });
+    if (g.currentScene) room.remaining.push({ type: "scene", scene: g.currentScene });
+    clearTimers(room);
+    clearQuestion(room);
+    g.currentScene = null;
+    g.reveal = null;
+    g.continueReady = [];
+    g.shopOpen = true;
+    g.encounter = "shop";
+    hooks.onState(room);
+    hooks.onShop?.(room, 0);
     return true;
   }
   return false;
@@ -213,7 +204,8 @@ export function forfeitPlayer(room: GameRoom, hooks: EngineHooks, player: Player
   if (room.status !== "playing" || player.eliminated) return;
   player.hp = 0;
   player.eliminated = true;
-  if (!settle(room, hooks)) hooks.onState(room);
+  if (room.game?.reveal) hooks.onState(room);
+  else if (!settle(room, hooks)) hooks.onState(room);
 }
 
 /** Cierra la ronda pero deja la carta a la vista, para que el reveal pueda señalar la respuesta. */
@@ -223,7 +215,6 @@ function closeQuestion(room: GameRoom) {
   if (g) {
     g.deadline = 0;
     g.answerStartsAt = 0;
-    g.visibleOptions = null;
   }
 }
 
@@ -327,6 +318,9 @@ function finish(room: GameRoom, hooks: EngineHooks, outcome: Outcome) {
   if (g) {
     g.outcome = outcome;
     g.finishedAt = Date.now();
+    g.encounter = null;
+    g.shopOpen = false;
+    g.reveal = null;
   }
   clearQuestion(room);
   if (g) g.currentScene = null;
@@ -335,30 +329,76 @@ function finish(room: GameRoom, hooks: EngineHooks, outcome: Outcome) {
   hooks.onState(room);
 }
 
-function scheduleAdvance(room: GameRoom, hooks: EngineHooks) {
-  room.timers.advance = setTimeout(() => advance(room, hooks), GAME_CONFIG.answerRevealMs);
-}
-
 function advance(room: GameRoom, hooks: EngineHooks) {
   const g = room.game;
-  if (!g) return;
+  if (!g || room.status !== "playing") return;
   clearTimers(room);
-  if (settle(room, hooks)) return;
+  g.continueReady = [];
   if (g.enemy && g.enemy.hp === 0) {
     g.enemiesDefeated += 1;
-    const coinsAwarded = randomInt(1, 4);
-    for (const player of room.players) player.coins += coinsAwarded;
+    for (const player of room.players) player.coins += 2;
     g.enemy = null;
-    if (!room.remaining.length) return finish(room, hooks, "won");
-    if (g.enemiesDefeated % 5 === 0) {
-      g.shopOpen = true;
-      hooks.onState(room);
-      hooks.onShop?.(room, coinsAwarded);
-      return;
-    }
-    spawnEnemy(room);
   }
+  if (settle(room, hooks)) return;
+  g.reveal = null;
+  clearQuestion(room);
+  if (!room.remaining.length) return finish(room, hooks, "won");
+  if (g.questionsCompleted > 0 && g.questionsCompleted % GAME_CONFIG.encounterEveryQuestions === 0) {
+    const encounters = ["shop", "campfire", "shop", "treasure", "shop", "shrine"] as const;
+    g.encounter = encounters[g.encounterCount++ % encounters.length];
+    g.encounterClaimed = [];
+    g.shopOpen = g.encounter === "shop";
+    hooks.onState(room);
+    if (g.shopOpen) hooks.onShop?.(room, 0);
+    return;
+  }
+  if (!g.enemy) spawnEnemy(room);
   dealCard(room, hooks);
+}
+
+/** Confirma la lectura del resultado o la salida de un encuentro entre todos los conectados. */
+export function continueGame(room: GameRoom, hooks: EngineHooks, player: Player, phase = room.game ? getContinuePhase(room.game) : "") {
+  const g = room.game;
+  if (!g || phase !== getContinuePhase(g) || room.status !== "playing" || !player.online || (!g.reveal && !g.encounter)) return;
+  if (g.reveal && Date.now() < g.revealedAt + GAME_CONFIG.answerRevealMs) return;
+  if (g.shopOpen && !alive(room).length) return hooks.onError(room, player.id, "PARTY_DOWN", "Usá un vial de resurrección de la mochila para seguir.");
+  if (!g.continueReady.includes(player.id)) g.continueReady.push(player.id);
+  reconcileContinue(room, hooks);
+}
+
+/** Las confirmaciones de jugadores desconectados nunca bloquean al grupo. */
+export function reconcileContinue(room: GameRoom, hooks: EngineHooks) {
+  const g = room.game;
+  if (!g || room.status !== "playing") return;
+  const required = onlinePlayers(room);
+  if (!required.length) return finish(room, hooks, "abandoned");
+  if ((g.reveal || g.encounter) && required.every(player => g.continueReady.includes(player.id))) {
+    if (g.encounter) {
+      if (!alive(room).length) return;
+      g.encounter = null;
+      g.shopOpen = false;
+      g.continueReady = [];
+      if (!g.enemy) spawnEnemy(room);
+      dealCard(room, hooks);
+    } else advance(room, hooks);
+  } else hooks.onState(room);
+}
+
+/** Cada integrante elige una recompensa una sola vez en el encuentro. */
+export function claimEncounter(room: GameRoom, hooks: EngineHooks, player: Player, choice: string) {
+  const g = room.game;
+  if (!g || room.status !== "playing" || !g.encounter || g.encounter === "shop" || g.encounterClaimed.includes(player.id)) return;
+  if (g.encounter === "campfire" && choice === "heal") {
+    player.hp = Math.min(player.maxHp, player.hp + 1);
+    player.eliminated = false;
+  } else if ((g.encounter === "campfire" || g.encounter === "shrine") && choice === "focus") {
+    g.abilityReadyAt[player.id] = g.turnNumber + 1;
+  } else if (g.encounter === "treasure" && choice === "coins") player.coins += 4;
+  else if (g.encounter === "treasure" && choice === "item") player.inventory.bomb = (player.inventory.bomb ?? 0) + 1;
+  else if (g.encounter === "shrine" && choice === "item") player.inventory.ward = (player.inventory.ward ?? 0) + 1;
+  else return;
+  g.encounterClaimed.push(player.id);
+  hooks.onState(room);
 }
 
 function dealCard(room: GameRoom, hooks: EngineHooks) {
@@ -379,11 +419,13 @@ function dealCard(room: GameRoom, hooks: EngineHooks) {
     return;
   }
   const card = entry.card;
+  g.reveal = null;
+  g.continueReady = [];
   g.currentScene = null;
   g.sceneReady = [];
   g.turnNumber += 1;
   for (const [playerId, active] of Object.entries(g.usedAbilities)) {
-    g.usedAbilities[playerId] = active.filter((ability) => !["discard", "heal", "extend", "track", "potion"].includes(ability));
+    g.usedAbilities[playerId] = active.filter((ability) => !["discard", "heal", "extend", "potion"].includes(ability));
   }
   room.drawn = card;
   g.current = { id: card.id, prompt: card.prompt, options: card.options };
@@ -392,6 +434,7 @@ function dealCard(room: GameRoom, hooks: EngineHooks) {
   room.wrongPlayers.clear();
   room.votes.clear();
   g.votesReceived = 0;
+  g.pending = room.remaining.filter(entry => entry.type === "question").length + 1;
   armDeadline(room, hooks);
   hooks.onState(room);
 }
@@ -399,9 +442,10 @@ function dealCard(room: GameRoom, hooks: EngineHooks) {
 function resolveVotes(room: GameRoom, hooks: EngineHooks, timeUp = false) {
   const g = room.game;
   const card = room.drawn;
-  if (!g || !card || room.status !== "playing") return;
+  if (!g || !card || g.reveal || !g.deadline || room.status !== "playing") return;
   clearTimers(room);
-  const voters = alive(room).filter((player) => player.online);
+  if (!onlinePlayers(room).length) return finish(room, hooks, "abandoned");
+  const voters = alive(room).filter((player) => player.online || room.votes.has(player.id));
   const wrongPlayers = voters.filter((player) => room.votes.get(player.id) !== card.answer);
   const correctPlayers = voters.filter((player) => room.votes.get(player.id) === card.answer);
   const wardBlocked = g.teamWard && wrongPlayers.length > 0;
@@ -429,18 +473,26 @@ function resolveVotes(room: GameRoom, hooks: EngineHooks, timeUp = false) {
     const hunter = room.players.find((mate) => mate.role === "Explorador" && activeAbilities(room, mate).includes("track"));
     if (hunter && correctPlayers.length) { damage += 1; consumeAbilityEffect(room, hunter, "track"); }
     if (correctPlayers.length) damage += g.bonusDamage;
-    g.bonusDamage = 0;
+    if (correctPlayers.length) g.bonusDamage = 0;
     if (enemy.trait === "escurridizo" && damage > 0) damage -= 1;
     enemy.hp = Math.max(0, enemy.hp - damage);
     if (enemy.trait === "vampiro" && playersDamaged > 0 && enemy.hp > 0) {
       enemy.hp = Math.min(enemy.maxHp, enemy.hp + 1);
     }
-    g.mastered += correctPlayers.length;
+  }
+  g.questionsCompleted += 1;
+  g.pending = room.remaining.filter(entry => entry.type === "question").length;
+  g.mastered += correctPlayers.length > 0 ? 1 : 0;
+  g.correctAnswers += correctPlayers.length;
+  g.answersGiven += voters.length;
+  for (const player of voters) {
+    player.answersGiven += 1;
+    if (room.votes.get(player.id) === card.answer) { player.correctAnswers += 1; player.coins += 1; }
   }
   closeQuestion(room);
-  hooks.onState(room);
-  if (settle(room, hooks)) return;
-  hooks.onReveal(room, {
+  g.revealedAt = Date.now();
+  g.continueReady = [];
+  g.reveal = {
     correct: correctPlayers.length > 0,
     answer: card.answer,
     ...(card.explanation ? { explanation: card.explanation } : {}),
@@ -452,23 +504,19 @@ function resolveVotes(room: GameRoom, hooks: EngineHooks, timeUp = false) {
     enemyDefeated: Boolean(enemy && enemy.hp === 0),
     correctVotes: correctPlayers.length,
     wrongVotes: wrongPlayers.length,
-  });
-  scheduleAdvance(room, hooks);
+  };
+  hooks.onState(room);
+  hooks.onReveal(room, g.reveal);
 }
 
+/** Reconcilia desconexiones sin resolver dos veces ni anticipar el reloj. */
 export function reconcileVotes(room: GameRoom, hooks: EngineHooks) {
-  const g = room.game;
-  if (!g || !room.drawn) return;
-  const required = alive(room).filter((player) => player.online);
-  if (required.length && required.every((player) => room.votes.has(player.id))) resolveVotes(room, hooks);
-  else hooks.onState(room);
+  reconcileContinue(room, hooks);
 }
 
-function onTimeout(room: GameRoom, hooks: EngineHooks) {
-  resolveVotes(room, hooks, true);
-}
-
-export function startGame(room: GameRoom, hooks: EngineHooks) {  if (room.status !== "lobby" || !room.cards.length) return;
+/** Prepara una expedición nueva y reinicia las estadísticas y la mochila. */
+export function startGame(room: GameRoom, hooks: EngineHooks) {
+  if (room.status !== "lobby" || !room.cards.length) return;
   clearTimers(room);
   room.wrongPlayers ??= new Set();
   room.votes ??= new Map();
@@ -492,10 +540,23 @@ export function startGame(room: GameRoom, hooks: EngineHooks) {  if (room.status
     p.maxHp = GAME_CONFIG.playerMaxHp;
     p.eliminated = false;
     p.coins = 3;
+    p.inventory = { healing: 1 };
+    p.correctAnswers = 0;
+    p.answersGiven = 0;
   }
   room.status = "playing";
   room.game = {
     pending: selectedCards,
+    totalQuestions: selectedCards,
+    questionsCompleted: 0,
+    correctAnswers: 0,
+    answersGiven: 0,
+    reveal: null,
+    revealedAt: 0,
+    continueReady: [],
+    encounter: null,
+    encounterCount: 0,
+    encounterClaimed: [],
     mastered: 0,
     enemiesDefeated: 0,
     enemy: null,
@@ -526,6 +587,7 @@ export function startGame(room: GameRoom, hooks: EngineHooks) {  if (room.status
 function advanceFromSceneIfReady(room: GameRoom, hooks: EngineHooks) {
   const g = room.game;
   if (!g?.currentScene) return false;
+  if (!onlinePlayers(room).length) { finish(room, hooks, "abandoned"); return true; }
   const required = onlinePlayers(room);
   if (!required.length || !required.every((player) => g.sceneReady.includes(player.id))) return false;
   g.currentScene = null;
@@ -551,7 +613,7 @@ export function reconcileSceneReady(room: GameRoom, hooks: EngineHooks) {
 export function handleAnswer(room: GameRoom, hooks: EngineHooks, player: Player, answer: number) {
   const g = room.game;
   const card = room.drawn;
-  if (!g || room.status !== "playing" || !card) return;
+  if (!g || room.status !== "playing" || !card || g.reveal || !g.deadline) return;
   if (player.eliminated) {
     hooks.onError(room, player.id, "ELIMINATED", "Caíste: podés mirar, pero ya no respondés.");
     return;
@@ -561,20 +623,27 @@ export function handleAnswer(room: GameRoom, hooks: EngineHooks, player: Player,
     return;
   }
   if (Date.now() > g.deadline) return;
-  if (!Number.isInteger(answer) || answer < 0 || answer >= card.options.length || room.votes.has(player.id)) return;
+  if (!Number.isInteger(answer) || answer < 0 || answer >= card.options.length || !g.visibleOptions?.includes(answer) || room.votes.has(player.id)) return;
   room.votes.set(player.id, answer);
   g.votesReceived = room.votes.size;
-  const required = alive(room).filter((mate) => mate.online);
-  if (required.length && required.every((mate) => room.votes.has(mate.id))) resolveVotes(room, hooks);
-  else hooks.onState(room);
+  hooks.onState(room);
 }
 
-export function buyShopItem(room: GameRoom, hooks: EngineHooks, player: Player, item: "healing" | "revive" | "phoenix" | "ward" | "partyHeal" | "bomb" | "focus", targetId?: string) {
+/** Compra objetos para guardarlos, incluso cuando todavía no hacen falta. */
+export function buyShopItem(room: GameRoom, hooks: EngineHooks, player: Player, item: ShopItem, _targetId?: string) {
   const g = room.game;
-  if (!g || room.status !== "playing" || !g.shopOpen) return;
-  const prices = getShopPrices(room.players.length);
-  const price = prices[item];
+  if (!g || room.status !== "playing" || !g.shopOpen || !Object.hasOwn(getShopPrices(room.players.length), item)) return;
+  const price = getShopPrices(room.players.length)[item];
   if (player.coins < price) return hooks.onError(room, player.id, "NOT_ENOUGH_COINS", "No te alcanzan las monedas para ese objeto.");
+  player.coins -= price;
+  player.inventory[item] = (player.inventory[item] ?? 0) + 1;
+  hooks.onState(room);
+}
+
+/** Usa un objeto de la mochila en cualquier fase de la partida; sólo se consume si aplica. */
+export function useItem(room: GameRoom, hooks: EngineHooks, player: Player, item: ShopItem, targetId?: string) {
+  const g = room.game;
+  if (!g || room.status !== "playing" || !Object.hasOwn(player.inventory, item) || !(player.inventory[item]! > 0)) return;
   if (item === "healing") {
     if (player.eliminated || player.hp >= player.maxHp) return hooks.onError(room, player.id, "HEAL_NOT_NEEDED", "Necesitás estar herido para usar una poción.");
     player.hp = Math.min(player.maxHp, player.hp + 2);
@@ -601,25 +670,18 @@ export function buyShopItem(room: GameRoom, hooks: EngineHooks, player: Player, 
     if (g.bonusDamage > 0) return hooks.onError(room, player.id, "BOMB_ALREADY_ARMED", "Ya hay una bomba lista para el próximo ataque.");
     g.bonusDamage += 2;
   } else if (item === "focus") {
+    const nextTurn = g.turnNumber + (g.deadline ? 0 : 1);
+    if (!room.players.some(mate => (g.abilityReadyAt[mate.id] ?? 0) > nextTurn)) return hooks.onError(room, player.id, "FOCUS_NOT_NEEDED", "Las habilidades ya están listas para el próximo combate.");
     for (const mate of room.players) g.abilityReadyAt[mate.id] = g.turnNumber;
   }
-  player.coins -= price;
+  player.inventory[item]! -= 1;
   hooks.onState(room);
-}
-
-export function continueFromShop(room: GameRoom, hooks: EngineHooks, player: Player) {
-  const g = room.game;
-  if (!g || room.status !== "playing" || !g.shopOpen) return;
-  if (!player.isCreator) return hooks.onError(room, player.id, "NOT_CREATOR", "Solo quien creó la sala puede cerrar la tienda.");
-  if (!alive(room).length) return hooks.onError(room, player.id, "PARTY_DOWN", "Reviví al menos a un aventurero antes de seguir.");
-  g.shopOpen = false;
-  if (!g.enemy) spawnEnemy(room);
-  dealCard(room, hooks);
+  hooks.onItem?.(room, player, item);
 }
 
 export function useAbility(room: GameRoom, hooks: EngineHooks, player: Player, ability: Ability) {
   const g = room.game;
-  if (!g || room.status !== "playing") return;
+  if (!g || room.status !== "playing" || !g.current || g.reveal || !g.deadline) return;
   if (Date.now() < g.answerStartsAt) {
     hooks.onError(room, player.id, "QUESTION_PREVIEW", "Esperá a que aparezcan las opciones para usar habilidades.");
     return;
@@ -640,6 +702,7 @@ export function useAbility(room: GameRoom, hooks: EngineHooks, player: Player, a
     return;
   }
   const active = activeAbilities(room, player);
+  if (active.includes(ability) && ["strike", "evade", "track"].includes(ability)) return hooks.onError(room, player.id, "ABILITY_ACTIVE", "Ese poder sigue preparado para el próximo impacto.");
   const used = () => { g.usedAbilities[player.id] = [...activeAbilities(room, player), ability]; };
   const card = room.drawn;
 

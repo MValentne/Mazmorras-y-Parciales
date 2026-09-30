@@ -9,7 +9,9 @@ export const GAME_CONFIG = {
   promptPreviewSeconds: 10,
   questionTimeSeconds: 25,
   bardAbilitySeconds: 10,
-  answerRevealMs: 4500,
+  answerRevealMs: 1500,
+  feedbackCorrectDelayMs: 800,
+  encounterEveryQuestions: 2,
   minOptions: 2,
   maxOptions: 6,
   mutedEnemyOptions: 3,
@@ -128,6 +130,9 @@ export interface Player {
   maxHp: number;
   eliminated: boolean;
   coins: number;
+  inventory: Partial<Record<ShopItem, number>>;
+  correctAnswers: number;
+  answersGiven: number;
 }
 
 export interface RoomSettings {
@@ -144,7 +149,18 @@ export interface DeckInfo {
 }
 
 export interface GameState {
+  /** Preguntas que faltan, incluida la actual mientras está abierta. */
   pending: number;
+  totalQuestions: number;
+  questionsCompleted: number;
+  correctAnswers: number;
+  answersGiven: number;
+  reveal: Reveal | null;
+  revealedAt: number;
+  continueReady: string[];
+  encounter: "shop" | "campfire" | "treasure" | "shrine" | null;
+  encounterCount: number;
+  encounterClaimed: string[];
   mastered: number;
   enemiesDefeated: number;
   enemy: Enemy | null;
@@ -169,6 +185,13 @@ export interface GameState {
   emergencyRescueGranted: boolean;
 }
 
+/** Identifica la fase que se confirma para ignorar clicks que llegan tarde. */
+export function getContinuePhase(game: GameState): string {
+  return game.encounter
+    ? `event:${game.encounterCount}:${game.emergencyRescueGranted}`
+    : `question:${game.turnNumber}`;
+}
+
 export interface RoomState {
   code: string;
   status: RoomStatus;
@@ -182,7 +205,7 @@ export interface RoomState {
 
 export interface Reveal {
   correct: boolean;
-  /** null en un fallo: la respuesta correcta no se revela hasta que termina la ronda. */
+  /** Se publica solamente al terminar el reloj de la pregunta. */
   answer: number | null;
   explanation?: string;
   damage: number;
@@ -205,12 +228,14 @@ export type ClientEvents = {
   "deck:upload": (payload: { title: string; cards?: Omit<Card, "id">[]; scenes?: DeckSceneInput[]; depth?: number }) => void;
   /** Sin playerId: el servidor lo toma de la sesión del socket, no del payload. */
   "game:start": () => void;
-  "game:answer": (payload: { answer: number }) => void;
+  "game:answer": (payload: { answer: number; cardId: string }) => void;
   "game:scene:continue": () => void;
+  "game:continue": (payload: { phase: string }) => void;
+  "game:event:claim": (payload: { choice: "heal" | "focus" | "coins" | "item" }) => void;
+  "game:item:use": (payload: { item: ShopItem; targetId?: string }) => void;
   "game:forfeit": () => void;
   "game:ability": (payload: { ability: Ability }) => void;
   "game:shop:buy": (payload: { item: "healing" | "revive" | "phoenix" | "ward" | "partyHeal" | "bomb" | "focus"; targetId?: string }) => void;
-  "game:shop:continue": () => void;
   /** Vuelve al lobby desde la pantalla de resultados, para rearmar otra ronda. */
   "game:lobby": () => void;
 };
@@ -223,6 +248,8 @@ export type ServerEvents = {
   "room:closed": (payload: { code: string; message: string }) => void;
   "room:left": () => void;
   "game:reveal": (reveal: Reveal) => void;
+  "game:vote": (vote: { cardId: string; answer: number | null }) => void;
+  "game:item": (effect: { playerId: string; nickname: string; item: ShopItem }) => void;
   "game:ability": (announcement: { playerId: string; nickname: string; role: Role; ability: Ability }) => void;
   "game:shop": (shop: { coinsAwarded: number; enemiesDefeated: number }) => void;
 };

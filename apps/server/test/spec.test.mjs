@@ -98,3 +98,8 @@ test("los comportamientos raros que promete el documento son los del servidor", 
   assert.equal(validateDeckTitle(""), "Mazo sin título");
   assert.equal(validateDeckTitle("x".repeat(100)).length, GAME_CONFIG.maxTitleLength);
 });
+
+// La copia descargable debe prometer exactamente las mismas reglas.
+test("el documento descargable coincide con el de la raíz", () => {
+  assert.equal(readFileSync(join(RAIZ, "apps/web/public/FORMATO-MAZO.md"), "utf8"), md);
+});

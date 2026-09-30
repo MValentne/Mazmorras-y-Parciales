@@ -9,12 +9,15 @@ import { Server, type Socket } from "socket.io";
 import { GAME_CONFIG, ROLE_ABILITIES, type Ability, type ClientEvents, type Player, type Role, type ServerEvents } from "@dungeon/shared";
 import {
   clearTimers,
+  continueGame,
+  reconcileContinue,
+  claimEncounter,
+  useItem,
   forfeitPlayer,
   handleAnswer,
   reconcileVotes,
   buyShopItem,
   continueScene,
-  continueFromShop,
   publicView,
   reconcileSceneReady,
   startGame,
@@ -49,8 +52,10 @@ function error(socketId: string, code: string, message: string) {
 }
 function publish(room: GameRoom) {
   room.updatedAt = Date.now();
-  if (room.game) room.game.pending = room.remaining.length;
   io.to(room.code).emit("room:state", publicView(room));
+  if (room.game?.current) for (const [playerId, socketId] of room.sockets) {
+    io.to(socketId).emit("game:vote", { cardId: room.game.current.id, answer: room.votes.get(playerId) ?? null });
+  }
 }
 const hooks: EngineHooks = {
   onState: publish,
@@ -58,6 +63,7 @@ const hooks: EngineHooks = {
   onAbility: (room, player, ability) => {
     if (player.role) io.to(room.code).emit("game:ability", { playerId: player.id, nickname: player.nickname, role: player.role, ability });
   },
+  onItem: (room, player, item) => io.to(room.code).emit("game:item", { playerId: player.id, nickname: player.nickname, item }),
   onShop: (room, coinsAwarded) => io.to(room.code).emit("game:shop", { coinsAwarded, enemiesDefeated: room.game?.enemiesDefeated ?? 0 }),
   onError: (room, playerId, code, message) => {
     const socketId = room.sockets.get(playerId);
@@ -99,6 +105,9 @@ const newPlayer = (id: string, nickname: string, isCreator: boolean): Player => 
   maxHp: GAME_CONFIG.playerMaxHp,
   eliminated: false,
   coins: 0,
+  inventory: {},
+  correctAnswers: 0,
+  answersGiven: 0,
 });
 
 io.on("connection", (socket: Socket<ClientEvents, ServerEvents>) => {
@@ -163,11 +172,9 @@ io.on("connection", (socket: Socket<ClientEvents, ServerEvents>) => {
   });
 
   socket.on("player:role", ({ role }) => {
-    const code = socket.data.roomCode as string | undefined;
-    const id = socket.data.playerId as string | undefined;
-    const room = code ? rooms.get(code) : undefined;
-    const player = room && id ? findPlayer(room, id) : undefined;
-    if (!room || !player || room.status !== "lobby") return;
+    const ctx = roomOf(socket);
+    if (!ctx || ctx.room.status !== "lobby") return;
+    const { room, player } = ctx;
     if (!GAME_CONFIG.roles.includes(role as Role)) return error(socket.id, "INVALID_ROLE", "Ese rol no está disponible.");
     player.role = role;
     publish(room);
@@ -209,6 +216,7 @@ io.on("connection", (socket: Socket<ClientEvents, ServerEvents>) => {
       clearTimers(room);
       rooms.delete(room.code);
     } else if (room.status === "playing" && room.game?.currentScene) reconcileSceneReady(room, hooks);
+    else if (room.status === "playing") reconcileContinue(room, hooks);
     else publish(room);
     socket.emit("room:left");
   });
@@ -239,16 +247,30 @@ io.on("connection", (socket: Socket<ClientEvents, ServerEvents>) => {
     startGame(room, hooks);
   });
 
-  socket.on("game:answer", ({ answer }) => {
+  socket.on("game:answer", ({ answer, cardId }) => {
     const ctx = roomOf(socket);
     if (!ctx) return;
-    handleAnswer(ctx.room, hooks, ctx.player, Number(answer));
+    if (cardId !== ctx.room.game?.current?.id || typeof answer !== "number") return;
+    handleAnswer(ctx.room, hooks, ctx.player, answer);
   });
 
   socket.on("game:scene:continue", () => {
     const ctx = roomOf(socket);
     if (!ctx) return;
     continueScene(ctx.room, hooks, ctx.player);
+  });
+
+  socket.on("game:continue", ({ phase }) => {
+    const ctx = roomOf(socket);
+    if (ctx && typeof phase === "string") continueGame(ctx.room, hooks, ctx.player, phase);
+  });
+  socket.on("game:event:claim", ({ choice }) => {
+    const ctx = roomOf(socket);
+    if (ctx) claimEncounter(ctx.room, hooks, ctx.player, choice);
+  });
+  socket.on("game:item:use", ({ item, targetId }) => {
+    const ctx = roomOf(socket);
+    if (ctx) useItem(ctx.room, hooks, ctx.player, item, targetId);
   });
 
   socket.on("game:ability", ({ ability }) => {
@@ -263,12 +285,6 @@ io.on("connection", (socket: Socket<ClientEvents, ServerEvents>) => {
     if (!ctx) return;
     if (!["healing", "revive", "phoenix", "ward", "partyHeal", "bomb", "focus"].includes(item)) return error(socket.id, "INVALID_ITEM", "Ese objeto no está en la tienda.");
     buyShopItem(ctx.room, hooks, ctx.player, item, targetId);
-  });
-
-  socket.on("game:shop:continue", () => {
-    const ctx = roomOf(socket);
-    if (!ctx) return;
-    continueFromShop(ctx.room, hooks, ctx.player);
   });
 
   socket.on("game:lobby", () => {
@@ -302,7 +318,7 @@ io.on("connection", (socket: Socket<ClientEvents, ServerEvents>) => {
       }
     }
     if (room.status === "playing" && room.game?.currentScene) reconcileSceneReady(room, hooks);
-    else if (room.status === "playing" && room.drawn) reconcileVotes(room, hooks);
+    else if (room.status === "playing") reconcileVotes(room, hooks);
     else publish(room);
   });
 });

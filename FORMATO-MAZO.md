@@ -17,10 +17,24 @@ siguientes. El juego nunca mezcla ni sortea las escenas o las preguntas.
   y confirmar. Si alguien se desconecta, deja de bloquear el avance.
 - Al terminar la escena, aparecen en orden las preguntas que contiene. Cada pregunta
   se muestra 10 segundos antes de habilitar sus opciones. El grupo tiene 25 segundos
-  para responder. Una respuesta incorrecta quita una vida; un acierto daña al
-  enemigo y muestra la explicación.
-- Si se termina el tiempo, reciben daño quienes todavía no habían fallado y esa
-  pregunta vuelve a intentarse antes de avanzar a la siguiente.
+  para responder. Cada jugador vota una sola vez: su elección queda azul.
+- Al terminar el reloj se resuelven todos los votos: cada acierto daña al enemigo;
+  cada error o falta de voto cuesta una vida (dos contra enemigos furiosos), salvo
+  que haya una protección. Las opciones incorrectas se marcan rojas y, 800 ms
+  después, la correcta aparece verde junto con la explicación.
+- El resultado queda visible hasta que **todos los jugadores conectados**, incluidos
+  los caídos, pulsen **Continuar**. El botón se habilita a los 1500 ms. No hay avance
+  automático ni repetición de preguntas; se respeta el orden narrativo del archivo.
+- Cada dos preguntas hay un encuentro, salvo al terminar el mazo: tienda, fogata,
+  tienda, tesoro, tienda, santuario; luego se repite el ciclo. Aparece como ventana
+  superpuesta, sin reloj, y todos confirman para seguir.
+- Las compras se guardan en la mochila. Los objetos se pueden usar en cualquier
+  fase de la partida. Cada jugador empieza con una poción y tres monedas; recibe
+  una moneda por acierto y dos por enemigo derrotado. La primera caída de todo el
+  equipo ofrece una tienda de rescate; una segunda caída termina la expedición.
+- Completar el recorrido con alguien en pie da la victoria. El resumen separa
+  preguntas resueltas, aciertos personales y aciertos del equipo. Una pregunta con
+  al menos un acierto suma una sola carta dominada, independientemente del grupo.
 - Las escenas ordenan y preparan los temas; las preguntas comprueban lo aprendido.
 
 Una escena debe poder leerse con comodidad, y a la vez enseñar lo necesario para

@@ -75,7 +75,7 @@ function cardsFromJson(text: string, fallbackTitle: string): Draft {
   const record = data && typeof data === "object" ? (data as Record<string, unknown>) : null;
   const list = Array.isArray(data) ? data : record?.cards ?? record?.questions ?? record?.preguntas;
   const scenes = Array.isArray(record?.scenes) ? record.scenes as DeckSceneInput[] : undefined;
-  if (!Array.isArray(list) && !scenes) return fail("El JSON tiene que incluir preguntas o una lista de escenas.");
+  if (!Array.isArray(list) && !scenes) return fail("El JSON tiene que incluir una lista de preguntas o escenas.");
   const sceneCards = (scenes ?? []).flatMap(scene => {
       const row = scene && typeof scene === "object" ? scene as DeckSceneInput : null;
       return Array.isArray(row?.cards) ? row.cards : [];
